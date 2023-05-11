@@ -1,88 +1,260 @@
 <!DOCTYPE html>
 <html lang="en">
-	<head>
-		<meta charset="utf-8">
-		<title>Kirara Fantasia Timers</title>
-        <meta name="viewport" content="width=device-width, initial-scale=1">
 
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.24.0/moment.min.js"></script>
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/moment-timezone/0.5.26/moment-timezone-with-data-2012-2022.min.js"></script>
+<head>
+    <meta charset="utf-8">
+    <title>Kirara Fantasia Timers</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
 
-		<script src="https://code.jquery.com/jquery-3.3.1.slim.min.js" integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo" crossorigin="anonymous"></script>
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.0/umd/popper.min.js" integrity="sha384-cs/chFZiN24E4KMATLdqdvsezGxaGsi4hLGOzlXwp5UZB1LY//20VyM2taTB4QvJ" crossorigin="anonymous"></script>
+    <script src="https://momentjs.com/downloads/moment-with-locales.js">
+    </script>
+    <script src="https://momentjs.com/downloads/moment-timezone-with-data-10-year-range.js"></script>
 
-		<script type="text/javascript" src="data.js"></script>
-		<script src="https://cdn.jsdelivr.net/npm/vue@2.5.17/dist/vue.min.js"></script>
-		<script type="text/javascript" src="components.js"></script>
+    <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js" integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.0/umd/popper.min.js" integrity="sha384-cs/chFZiN24E4KMATLdqdvsezGxaGsi4hLGOzlXwp5UZB1LY//20VyM2taTB4QvJ" crossorigin="anonymous"></script>
 
-		<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.0/css/bootstrap.min.css" integrity="sha384-9gVQ4dYFwwWSjIDZnLEWnxCjeSWFphJiwGPXr1jddIhOegiu1FwO5qRGvFXOdJZ4" crossorigin="anonymous">
-		<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.1.0/js/bootstrap.min.js" integrity="sha384-uefMccjFJAIv6A+rW+L4AHf99KvxDjWSu1z9VI8SKNVmz4sk7buKt/6v9KI65qnm" crossorigin="anonymous"></script>
+    <script type="text/javascript" src="data.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.5.17/dist/vue.min.js"></script>
+    <script type="text/javascript" src="components.js"></script>
 
-		<link rel="stylesheet" type="text/css" href="style.css">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.0/css/bootstrap.min.css" integrity="sha384-9gVQ4dYFwwWSjIDZnLEWnxCjeSWFphJiwGPXr1jddIhOegiu1FwO5qRGvFXOdJZ4" crossorigin="anonymous">
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.1.0/js/bootstrap.min.js" integrity="sha384-uefMccjFJAIv6A+rW+L4AHf99KvxDjWSu1z9VI8SKNVmz4sk7buKt/6v9KI65qnm" crossorigin="anonymous"></script>
 
-        <link rel="icon" href="favicon.png">
-	</head>
-	<body>
-		<div class="container-fluid" id="app">
-			<div class="modal fade" id="exampleModal" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel" aria-hidden="true">
-				<div class="modal-dialog modal-dialog-centered" role="document">
-					<div class="modal-content">
-						<div class="modal-header">
-							<h5 class="modal-title" id="exampleModalLabel">Contact Information</h5>
-							<button type="button" class="close" data-dismiss="modal" aria-label="Close">
-							<span aria-hidden="true">&times;</span>
-							</button>
-						</div>
-						<div class="modal-body">
-							<a href='https://www.reddit.com/message/compose/?to=RiceKirby&subject=About KiraFan Timer' target='_blank'>By sending a PM to RiceKirby in Reddit</a><br>
-							<ul>
-								<li>To report information errors (names, dates, etc).</li>
-								<li>For general feedback and opinions.</li>
-								<li>If you just want to have a chat.</li>
-							</ul>
-							<a href='https://github.com/IceKirby/kirafan-timer/issues' target='_blank'>By creating an issue on GitHub</a>
-							<ul>
-								<li>To report some feature not working (wrong timezone, timer not updating, display error, etc). Please specify the browser and device you are using and attach a screenshot if possible.</li>
-								<li>To suggest new features.</li>
-							</ul>
+    <link rel="stylesheet" type="text/css" href="style.css">
 
-						</div>
-						<div class="modal-footer">
-							<button type="button" class="btn btn-primary" data-dismiss="modal">Close</button>
-						</div>
-					</div>
-				</div>
-			</div>
+    <link rel="icon" href="favicon.png">
+</head>
 
-			<div id="header" v-show="showHeader">
-				<h1>Kirara Fantasia Timers</h1>
+<body>
+    <div class="container-fluid" id="app">
+        <div class="modal fade" id="exampleModal" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="exampleModalLabel">Contact Information</h5>
+                        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                    </div>
+                    <!--                <div class="modal-body">-->
+                    <!--                    <a href='https://www.reddit.com/message/compose/?to=RiceKirby&subject=About KiraFan Timer'-->
+                    <!--                       target='_blank'>By sending a PM to RiceKirby in Reddit</a><br>-->
+                    <!--                    <ul>-->
+                    <!--                        <li>To report information errors (names, dates, etc).</li>-->
+                    <!--                        <li>For general feedback and opinions.</li>-->
+                    <!--                        <li>If you just want to have a chat.</li>-->
+                    <!--                    </ul>-->
+                    <!--                    <a href='https://github.com/IceKirby/kirafan-timer/issues' target='_blank'>By creating an issue on-->
+                    <!--                        GitHub</a>-->
+                    <!--                    <ul>-->
+                    <!--                        <li>To report some feature not working (wrong timezone, timer not updating, display error, etc).-->
+                    <!--                            Please specify the browser and device you are using and attach a screenshot if possible.-->
+                    <!--                        </li>-->
+                    <!--                        <li>To suggest new features.</li>-->
+                    <!--                    </ul>-->
 
-				<div class="btn-group btn-group-toggle w-100 time-buttons">
-					<label class="btn btn-primary" :class="{active: currentZone == 'japan' }" id="japan-time">
-						<input type="radio" name="options" value="japan" v-model="currentZone" @change="changeTimezone"> <h3>Japan Time</h3>
-						<span v-text="japanTime"></span>
-					</label>
-					<label class="btn btn-primary" :class="{active: currentZone == 'local' }" id="local-time">
-						<input type="radio" name="options" value="local" v-model="currentZone" @change="changeTimezone">
-						<h3>Local Time</h3>
-						<span v-text="localTime"></span>
-					</label>
-				</div>
-				<span class='contact-button bg-warning text-dark' data-toggle="modal" data-target="#exampleModal">Found an error or have a suggestion?</span>
+                    <!--                </div>-->
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-primary" data-dismiss="modal">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
-	            <div class='alert-container' :class='{ alertsshow: alerts.length > 0 }'>
-	                <div v-for='(item, index) in alerts' class="alert" :class="'alert-'+alertTypes[0]" role="alert" v-html="item"></div>
-	            </div>
-			</div>
+        <div id="header" v-show="showHeader">
+            <h1>琪拉拉饭太稀计时器</h1>
 
-			<div class="row" id="columns-holder">
-				<div v-for="col in timersData" class="col-md-6 col-xl">
-					<event-group v-for="(t, index) in col" v-bind:ev="t" :key='index'></event-group>
-				</div>
-			</div>
+            <div class="btn-group btn-group-toggle w-100 time-buttons">
+                <label class="btn btn-primary" :class="{active: currentZone == 'japan' }" id="japan-time">
+                <input type="radio" name="options" value="japan" v-model="currentZone" @change="changeTimezone">
+                <h3>日本时间</h3>
+                <span v-text="japanTime"></span>
+            </label>
+                <label class="btn btn-primary" :class="{active: currentZone == 'local' }" id="local-time">
+                <input type="radio" name="options" value="local" v-model="currentZone" @change="changeTimezone">
+                <h3>当地时间</h3>
+                <span v-text="localTime"></span>
+            </label>
+            </div>
+            <!--        <span class='contact-button bg-warning text-dark' data-toggle="modal" data-target="#exampleModal">Found an error or have a suggestion?</span>-->
+
+            <div class='alert-container' :class='{ alertsshow: alerts.length > 0 }'>
+                <div v-for='(item, index) in alerts' class="alert" :class="'alert-'+alertTypes[0]" role="alert" v-html="item"></div>
+            </div>
+        </div>
+
+        <div class="row" id="columns-holder">
+            <div v-for="col in timersData" class="col-md-6 col-xl">
+                <event-group v-for="(t, index) in col" v-bind:ev="t" :key='index'></event-group>
+            </div>
+        </div>
+        <!-- 触发弹出框的按钮 -->
+        <button id="myBtn">上香</button>
+
+        <!-- 弹出框 -->
+        <div id="myModal" class="modal">
+
+            <!-- 弹出框内容 -->
+            <div class="modal-content">
+                <!--        <span class="close">&times;</span>-->
+                <p>这里是一段话。</p>
+                <img src="https://www.w3schools.com/w3images/lights.jpg" alt="Lights" style="width:100%">
+            </div>
+
+        </div>
+
+        <span id="busuanzi_container_site_pv">已经有<span id="busuanzi_value_site_uv"></span>人来扫墓</span>
+    </div>
+    <script type="text/javascript" src="app.js"></script>
+    <script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+</body>
 
 
-		</div>
-		<script type="text/javascript" src="app.js"></script>
-	</body>
+<style>
+    /* 弹出框样式 */
+    
+    .modal {
+        display: none;
+        /* 隐藏弹出框 */
+        position: fixed;
+        /* 固定定位 */
+        z-index: 1;
+        /* 设置弹出框在最上层 */
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        overflow: auto;
+        /* 允许滚动 */
+        background-color: rgb(0, 0, 0);
+        /* 背景颜色 */
+        background-color: rgba(0, 0, 0, 0.4);
+        /* 背景颜色，半透明 */
+    }
+    /* 弹出框内容样式 */
+    
+    .modal-content {
+        background-color: #fefefe;
+        margin: auto;
+        padding: 20px;
+        border: 1px solid #888;
+        width: 80%;
+    }
+    
+    .modal-content {
+        background-color: #fefefe;
+        margin: auto;
+        padding: 20px;
+        border: 1px solid #888;
+        width: 40%;
+        /* 弹出框宽度为窗口宽度的40% */
+        position: absolute;
+        /* 绝对定位 */
+        top: 50%;
+        /* 距离顶部50% */
+        left: 50%;
+        /* 距离左侧50% */
+        transform: translate(-50%, -50%);
+        /* 水平和垂直居中 */
+    }
+    /* 关闭按钮样式 */
+    
+    .close {
+        color: #aaaaaa;
+        float: right;
+        font-size: 28px;
+        font-weight: bold;
+    }
+    
+    .close:hover,
+    .close:focus {
+        color: #000;
+        text-decoration: none;
+        cursor: pointer;
+    }
+    /* 过渡动画样式 */
+    
+    .fade {
+        animation-name: fadeOut;
+        /* 动画名称 */
+        animation-duration: .5s;
+        /* 动画持续时间 */
+    }
+    /* 动画关键帧 */
+    
+    @keyframes fadeOut {
+        from {
+            opacity: .5;
+        }
+        /* 开始时的透明度 */
+        to {
+            opacity: .1;
+        }
+        /* 结束时的透明度 */
+    }
+</style>
+<script src="https://cdn.bootcdn.net/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+<script>
+    // 生成文本和图片
+    var texts = ["你给琪拉拉上了一柱香", "你给兰普上了一柱香", "你给抽卡妹上了一柱香"];
+    var images = ["imgs/kirara_b.png", "imgs/lamp_b.png", "imgs/clea_b.png"];
+    var index = 0
+
+    function randomText() {
+        return texts[index];
+    }
+
+    function randomImage() {
+        return images[index];
+    }
+
+    // 更新弹出框内容
+    function updateModalContent() {
+
+        console.log(index)
+        var text = randomText();
+        var image = randomImage();
+        $(".modal-content p").text(text);
+        $(".modal-content img").attr("alt", text).attr("src", image);
+        index = Math.floor(Math.random() * 100);
+        index = (index + 1) % texts.length;
+    }
+
+    // // 每隔5秒更新一次弹出框内容
+    // setInterval(updateModalContent, 5000);
+
+
+    $(document).ready(function() {
+        // 获取弹出框
+        var modal = $("#myModal");
+
+        // 获取触发弹出框的按钮
+        var btn = $("#myBtn");
+
+        // 获取关闭按钮
+        var span = $(".close");
+
+        // 当用户点击按钮时，打开弹出框
+        btn.click(function() {
+            updateModalContent();
+            modal.fadeIn(800); // 在2000毫秒内显示弹出框
+            setTimeout(function() {
+                modal.fadeOut(400); // 在5000毫秒内关闭弹出框
+            }, 2000); // 在2000毫秒后关闭弹出框
+        });
+
+        // 当用户点击关闭按钮时，关闭弹出框
+        span.click(function() {
+            modal.fadeOut(400); // 在5000毫秒内关闭弹出框
+        });
+
+        // 当用户点击任何地方时，关闭弹出框
+        $(window).click(function(event) {
+            if (event.target == modal[0]) {
+                modal.fadeOut(400); // 在5000毫秒内关闭弹出框
+            }
+        });
+    });
+</script>
+
 </html>

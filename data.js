@@ -1,4 +1,4 @@
-var alertMessages = ["Thank you for everything, Kirara Fantasia!"];
+var alertMessages = ["你游寄了你游寄你游寄了"];
 var alertTypes = ["primary"];
 var timerData = [
     {
@@ -36,19 +36,21 @@ var timerData = [
         ]
     },
     {
-        type: "Other",
+        type: "寄",
         title: [
             "Kirara Fantasia",
-            "Service Period"
+            "寄寄寄寄寄寄寄"
         ],
-        image: "kirara",
+        image: "imgs/kirara_b.png",
         column: 0,
         priority: 40,
         timers: [
             {
-                name: "Service Period",
-                start: "December 11 2017, 8:00",
-                end: "February 28 2023, 15:59",
+                name: "寄寄寄寄寄寄寄",
+                // start: "December 11 2017, 8:00",
+                // end: "February 28 2023, 15:59",
+                start: "12月 11日 2017, 8:00",
+                end: "2月 28日 2023, 15:59",
                 keepAfterFinished: "2000 days"
             }
         ]
@@ -344,7 +346,7 @@ var timerData = [
             }
         ]
     },
-    
+
     {
         "type": "Other",
         "title": [

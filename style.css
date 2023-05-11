@@ -264,7 +264,7 @@ body {
 .badge {
     line-height: 1.15rem;
     height: 36px;
-    min-width: 64px;
+    min-width: 74px;
     box-sizing: content-box;
     border-radius: 3px;
     padding: 3px 5px;
@@ -428,7 +428,7 @@ body {
 }
 
 .alert {
-    margin-top: 15px;
+    margin-top: 10px;
 }
 .alert-container {
     display: none;
