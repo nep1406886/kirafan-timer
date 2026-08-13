@@ -54,6 +54,21 @@
         </div>
 
         <main>
+        <div id="action-and-counter-holder">
+            <img src="imgs/Kirara_Sekika_StandPic_0.png" alt="Kirara Sekika" id="main-character-sprite">
+            <div class="memorial-action">
+                <button id="offeringButton" class="offering-button" type="button" aria-haspopup="dialog">
+                    <span aria-hidden="true">✦</span>
+                    上香
+                </button>
+                <span id="offeringCount" class="offering-count" aria-live="polite"></span>
+            </div>
+            <div class="visitor-counter" aria-live="polite">
+                <span>已有 <strong id="vercount_value_site_uv" class="visitor-value">读取中</strong> 人来扫墓</span>
+                <span class="counter-divider" aria-hidden="true"></span>
+                <span>页面浏览 <strong id="vercount_value_site_pv" class="visitor-value">读取中</strong></span>
+            </div>
+        </div>
         <div class="row" id="columns-holder">
             <div v-for="(col, colIndex) in timersData" :key="colIndex" class="col-md-6 col-xl">
                 <event-group v-for="(t, index) in col" v-bind:ev="t" :key='index'></event-group>
@@ -67,31 +82,13 @@
                 <p>关服前后，创作者们为这个世界留下的几封信。</p>
             </div>
             <div class="memory-grid">
-                <article class="memory-card">
-                    <a href="https://x.com/chibasadoru/status/1629823090833362945" target="_blank" rel="noopener noreferrer">
-                        <img src="asset/shutdown-artworks/images/chiba-sadoru-1629823090833362945-01.jpg" alt="千葉サドル发布的琪拉拉幻想曲关服纪念插画" loading="lazy">
+                <article class="memory-card" v-for="artwork in shutdownArtworks" :key="artwork.id">
+                    <a :href="artwork.postUrl" target="_blank" rel="noopener noreferrer">
+                        <img :src="'asset/shutdown-artworks/' + artwork.images[0].path" :alt="artwork.mediaNote" loading="lazy">
                     </a>
                     <div class="memory-card-body">
-                        <span>千葉サドル · 《学园孤岛》</span>
-                        <p>五年来，真的非常感谢。</p>
-                    </div>
-                </article>
-                <article class="memory-card">
-                    <a href="https://x.com/hankao42/status/1630571298090020865" target="_blank" rel="noopener noreferrer">
-                        <img src="asset/shutdown-artworks/images/hanzawa-kaori-1630571298090020865-01.jpg" alt="はんざわかおり发布的琪拉拉幻想曲关服纪念插画" loading="lazy">
-                    </a>
-                    <div class="memory-card-body">
-                        <span>はんざわかおり · 《Comic Girls》</span>
-                        <p>能够相遇，真是幸福。</p>
-                    </div>
-                </article>
-                <article class="memory-card">
-                    <a href="https://x.com/_harayui/status/1630512055827730432" target="_blank" rel="noopener noreferrer">
-                        <img src="asset/shutdown-artworks/images/hara-yui-1630512055827730432-01.jpg" alt="原悠衣发布的琪拉拉幻想曲关服纪念插画" loading="lazy">
-                    </a>
-                    <div class="memory-card-body">
-                        <span>原悠衣 · 《黄金拼图》</span>
-                        <p>感谢大家游玩琪拉拉幻想曲。</p>
+                        <span>{{ artwork.author.name }} · {{ artwork.work }}</span>
+                        <p v-html="artwork.textJa"></p>
                     </div>
                 </article>
             </div>
@@ -115,18 +112,6 @@
         </main>
 
         <footer class="memorial-footer">
-            <div class="memorial-action">
-                <button id="offeringButton" class="offering-button" type="button" aria-haspopup="dialog">
-                    <span aria-hidden="true">✦</span>
-                    献上一束星光
-                </button>
-                <span id="offeringCount" class="offering-count" aria-live="polite"></span>
-            </div>
-            <div class="visitor-counter" aria-live="polite">
-                <span>来访者 <strong id="vercount_value_site_uv" class="visitor-value">读取中</strong></span>
-                <span class="counter-divider" aria-hidden="true"></span>
-                <span>页面浏览 <strong id="vercount_value_site_pv" class="visitor-value">读取中</strong></span>
-            </div>
             <p class="footer-note">感谢每一段在艾特瓦利亚度过的时光。</p>
             <nav class="source-links" aria-label="游戏资料来源">
                 <a href="https://kirarafantasia.miraheze.org/wiki/Main_Page" target="_blank" rel="noopener noreferrer">Kirara Fantasia Fan-Wiki</a>
@@ -139,7 +124,7 @@
             <div class="offering-dialog">
                 <button class="offering-close" type="button" data-close-offering aria-label="关闭">×</button>
                 <img id="offeringImage" src="imgs/kirara_b.png" alt="">
-                <p id="offeringMessage">你为琪拉拉献上了一束星光</p>
+                <p id="offeringMessage">你为琪拉拉上了一炷香</p>
             </div>
         </div>
     </div>

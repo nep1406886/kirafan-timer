@@ -65,7 +65,8 @@ var vm = new Vue({
         columns: 3,
         filters: null,
         alerts: alertMessages,
-        alertTypes: alertTypes
+        alertTypes: alertTypes,
+        shutdownArtworks: []
     },
     methods: {
         changeTimezone: function () {
@@ -607,14 +608,24 @@ var vm = new Vue({
         // 设置语言环境
 
         setInterval(this.updateClocks, 1 * 1000);
+
+        // Fetch artworks.json
+        fetch('asset/shutdown-artworks/artworks.json')
+            .then(response => response.json())
+            .then(data => {
+                this.shutdownArtworks = data.items;
+            })
+            .catch(error => {
+                console.error('Error loading artworks.json:', error);
+            });
     }
 });
 
 (function () {
     var offerings = [
-        { message: "你为琪拉拉献上了一束星光", image: "imgs/kirara_b.png" },
-        { message: "你为兰普献上了一束星光", image: "imgs/lamp_b.png" },
-        { message: "你为克蕾雅献上了一束星光", image: "imgs/clea_b.png" }
+        { message: "你为琪拉拉上了一炷香", image: "imgs/kirara_b.png" },
+        { message: "你为兰普上了一炷香", image: "imgs/lamp_b.png" },
+        { message: "你为克蕾雅上了一炷香", image: "imgs/clea_b.png" }
     ];
     var storageKey = "kirafan-offering-count";
     var closeTimer;
@@ -648,7 +659,7 @@ var vm = new Vue({
         }
 
         function renderCount() {
-            countLabel.textContent = count > 0 ? "你已献上 " + count + " 次" : "";
+            countLabel.textContent = count > 0 ? "已上香 " + count + " 次" : "";
         }
 
         function closeOffering() {

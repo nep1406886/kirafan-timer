@@ -23,7 +23,7 @@ body {
     flex-direction: column;
     justify-content: space-between;
     background-color: #2b2529;
-    background-image: url("imgs/kiraraOP/Gemini_Generated_Image_m58hijm58hijm58h.png");
+    background-image: url("imgs/mainbg.png");
     background-position: center 36%;
     background-size: cover;
     color: #fff;
@@ -775,6 +775,95 @@ main {
     margin-top: 0;
     margin-right: 0;
     margin-left: 0;
+}
+
+#action-and-counter-holder {
+    display: flex;
+    flex-direction: column; /* Default to column for small screens */
+    align-items: center;
+    gap: 24px; /* Space between the action and counter */
+    margin-bottom: 24px; /* Space above timers */
+}
+
+#main-character-sprite {
+    max-width: 240px;
+    max-height: 380px;
+    object-fit: contain;
+    filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.28));
+}
+
+#action-and-counter-holder .memorial-action,
+#action-and-counter-holder .visitor-counter {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    color: #2b2529;
+}
+
+#action-and-counter-holder .offering-button {
+    min-height: 46px;
+    padding: 10px 26px;
+    border: 1px solid #d84e81;
+    border-radius: 24px;
+    background: #fff;
+    color: #d84e81;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    box-shadow: 0 6px 18px rgba(216, 78, 129, 0.18);
+    transition: background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+
+#action-and-counter-holder .offering-button:hover,
+#action-and-counter-holder .offering-button:focus-visible {
+    background: #d84e81;
+    color: #fff;
+    box-shadow: 0 8px 22px rgba(216, 78, 129, 0.32);
+    outline: none;
+}
+
+#action-and-counter-holder .offering-count {
+    min-height: 20px;
+    color: #857980;
+    font-size: 0.8rem;
+}
+
+#action-and-counter-holder .visitor-counter {
+    flex-direction: row;
+    gap: 14px;
+    color: #6f636a;
+    font-size: 0.86rem;
+}
+
+#action-and-counter-holder .visitor-value {
+    color: #d84e81;
+    font-variant-numeric: tabular-nums;
+}
+
+#action-and-counter-holder .counter-divider {
+    width: 1px;
+    height: 14px;
+    background: #d8ccd1;
+}
+
+@media screen and (min-width: 768px) {
+    #action-and-counter-holder {
+        flex-direction: row; /* Row for larger screens */
+        justify-content: center;
+        align-items: center;
+        gap: 44px;
+    }
+}
+
+/* Original footer styles (kept for context, but these elements now live above the timers) */
+.memorial-action {
+    min-height: 69px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 7px;
 }
 
 .alert {
