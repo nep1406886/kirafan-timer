@@ -1,4 +1,4 @@
-var alertMessages = ["你游寄了你游寄你游寄了"];
+var alertMessages = ["琪拉拉幻想曲已于 2023 年 2 月 28 日停止运营，并发布离线版本。"];
 var alertTypes = ["primary"];
 var timerData = [
     {
@@ -36,22 +36,21 @@ var timerData = [
         ]
     },
     {
-        type: "寄",
+        type: "Memorial",
         title: [
             "Kirara Fantasia",
-            "寄寄寄寄寄寄寄"
+            "きららファンタジア",
+            "服务时间记录"
         ],
         image: "imgs/kirara_b.png",
         column: 0,
         priority: 40,
         timers: [
             {
-                name: "寄寄寄寄寄寄寄",
-                // start: "December 11 2017, 8:00",
-                // end: "February 28 2023, 15:59",
+                name: "琪拉拉幻想曲运营时间",
                 start: "12月 11日 2017, 8:00",
                 end: "2月 28日 2023, 15:59",
-                keepAfterFinished: "2000 days"
+                keepAfterFinished: true
             }
         ]
     },

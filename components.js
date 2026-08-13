@@ -31,11 +31,48 @@ Vue.component("ev-charicon", {
 
 Vue.component("ev-content", {
     props: ["ev"],
-    template: `<ev-content-dates v-if='ev.type == \"LoginDays\"' v-bind:ev='ev'></ev-content-dates>
+    template: `<memorial-timer v-if='ev.type == \"Memorial\"' v-bind:timer='ev.timers[0]'></memorial-timer>
+    <ev-content-dates v-else-if='ev.type == \"LoginDays\"' v-bind:ev='ev'></ev-content-dates>
     <ev-content-weekend v-else-if='ev.type == \"WeekendBoss\"' v-bind:ev='ev'></ev-content-weekend>
     <div class='content' v-else>
         <normal-timer v-for='(t, index) in ev.timers' v-bind:timer='t' :key='index' v-if='t.visible'></normal-timer>
     </div>`
+});
+
+Vue.component("memorial-timer", {
+    props: ["timer"],
+    template: `<section class='memorial-timer' aria-label='琪拉拉幻想曲运营时间'>
+        <div class='memorial-primary'>
+            <span class='memorial-eyebrow'>停服至今</span>
+            <strong class='memorial-elapsed'>{{ timer.sinceEnd }}</strong>
+            <span class='memorial-status'>离线版仍可继续游玩</span>
+        </div>
+        <div class='memorial-facts'>
+            <div class='memorial-fact'>
+                <span>正式上线 · {{ zoneLabel }}</span>
+                <strong v-html='startTime'></strong>
+            </div>
+            <div class='memorial-fact'>
+                <span>停止运营 · {{ zoneLabel }}</span>
+                <strong v-html='endTime'></strong>
+            </div>
+            <div class='memorial-fact'>
+                <span>运营时长</span>
+                <strong>{{ timer.operationDuration }}</strong>
+            </div>
+        </div>
+    </section>`,
+    computed: {
+        zoneLabel: function() {
+            return this.timer.displayMode == "japan" ? "日本时间" : "当地时间";
+        },
+        startTime: function() {
+            return this.timer.displayMode == "japan" ? this.timer.dateDisplay.jpstart : this.timer.dateDisplay.localstart;
+        },
+        endTime: function() {
+            return this.timer.displayMode == "japan" ? this.timer.dateDisplay.jpend : this.timer.dateDisplay.localend;
+        }
+    }
 });
 
 Vue.component("ev-content-dates", {
@@ -206,6 +243,8 @@ Vue.component("ev-thumb", {
                     return "Login Bonus";
                 case "weekendboss":
                     return "Weekend Boss";
+                case "memorial":
+                    return "纪念";
                 default:
                     return value.charAt(0).toUpperCase() + value.slice(1);
             }

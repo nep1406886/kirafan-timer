@@ -244,14 +244,19 @@ var vm = new Vue({
             //下面俩时间的显示
             var strFormat = "MMM D YYYY<br>ddd H:mm";
             moment.locale("zh-cn");
-            startMoment = moment.tz(timer.start, "MMM D YYYY, HH:mm", "Asia/Tokyo");
-            endMoment = moment.tz(timer.end, "MMM D YYYY, HH:mm", "Asia/Tokyo");
+            startMoment = this.parseMoment(timer.start);
+            endMoment = this.parseMoment(timer.end);
+            if (ev.type == "Memorial") {
+                strFormat = "YYYY年M月D日<br>ddd HH:mm";
+            }
             if (extraDays > 0) {
                 endMoment = endMoment.add(extraDays, "days");
             }
 
             timer.rawStart = startMoment._d.getTime();
             timer.rawEnd = endMoment._d.getTime();
+            timer.operationDuration = this.timeDescription(timer.rawEnd - timer.rawStart, 4);
+            timer.sinceEnd = "";
 
             // Creates markers
             var marks = [];
@@ -305,7 +310,7 @@ var vm = new Vue({
             return timer;
         },
         createMarker: function (marker, timer, localZone) {
-            var markTime = moment.tz(marker.time, "MMM D YYYY, H:mm", "Asia/Tokyo");
+            var markTime = this.parseMoment(marker.time);
             var tooltipFormat = "ddd, MMM Do, H:mm";
             var rawTime = markTime._d.getTime();
             var mark = {
@@ -396,15 +401,17 @@ var vm = new Vue({
             ev.localend = deadline.clone().tz(localZone).format("MMM Do, H:mm");
         },
         updateEventGroup: function (ev, now, changeThumbs) {
-            let allExpired = true,
+            var allExpired = true,
                 nextDate = Infinity,
                 nextType = "finished",
                 lastDate = 0;
 
             // Check each individual timer
-            for (t = 0; t < ev.timers.length; t++) {
-                timer = ev.timers[t];
-                this.updateEventTimer(timer, ev, now);
+            for (var t = 0; t < ev.timers.length; t++) {
+                var timer = ev.timers[t];
+                if (this.updateEventTimer(timer, ev, now)) {
+                    allExpired = false;
+                }
 
                 if (timer.rawStart > now && timer.rawStart < nextDate) {
                     nextDate = timer.rawStart;
@@ -421,11 +428,11 @@ var vm = new Vue({
 
             // Updates text for LoginDays timers
             if (nextType == "finished") {
-                ev.nextTimer = "Finished " + this.remainingTimeString(now, lastDate, 2) + " ago";
+                ev.nextTimer = "已结束 " + this.remainingTimeString(now, lastDate, 2);
             } else if (nextType == "upcoming") {
-                ev.nextTimer = "Next date starts in " + this.remainingTimeString(now, nextDate, 2);
+                ev.nextTimer = "下一阶段将在 " + this.remainingTimeString(now, nextDate, 2) + " 后开始";
             } else {
-                ev.nextTimer = "Current date finishes in " + this.remainingTimeString(now, nextDate, 2);
+                ev.nextTimer = "当前阶段还剩 " + this.remainingTimeString(now, nextDate, 2);
             }
 
             // Changes thumbnail for Event Group
@@ -446,25 +453,25 @@ var vm = new Vue({
             // Check if timer should be visible
             timer.visible = false;
             timer.progress = this.countProgress(now, timer.rawStart, timer.rawEnd);
+            timer.sinceEnd = now >= timer.rawEnd
+                ? this.timeDescription(now - timer.rawEnd, 4)
+                : this.timeDescription(timer.rawEnd - now, 4) + " 后";
             if (timer.keepAfterFinished === true || timer.type == "weekend" || timer.expiration > now) {
                 timer.visible = true;
-                if (timer.type != "weekend") {
-                    allExpired = false;
-                }
 
                 // Write strings for progress bar dates according to state
                 if (timer.progress <= 0) {
-                    timer.dateDisplay.barLabel = "Starts in " + this.remainingTimeString(now, timer.rawStart, 2);
-                    timer.dateDisplay.badgeStart = "Starts in " + this.remainingTimeString(now, timer.rawStart, 5);
-                    timer.dateDisplay.badgeEnd = "Ends in " + this.remainingTimeString(now, timer.rawEnd, 5);
+                    timer.dateDisplay.barLabel = this.remainingTimeString(now, timer.rawStart, 2) + " 后开始";
+                    timer.dateDisplay.badgeStart = this.remainingTimeString(now, timer.rawStart, 5) + " 后开始";
+                    timer.dateDisplay.badgeEnd = this.remainingTimeString(now, timer.rawEnd, 5) + " 后结束";
                 } else if (timer.progress >= 100) {
-                    timer.dateDisplay.barLabel = "寄" + this.remainingTimeString(now, timer.rawEnd, 5) + "寄";
-                    timer.dateDisplay.badgeEnd = "死了 " + this.remainingTimeString(now, timer.rawEnd, 5) + " 这么久";
-                    timer.dateDisplay.badgeStart = "活了 " + this.remainingTimeString(now, timer.rawStart, 5) + " 这么久";
+                    timer.dateDisplay.barLabel = "已结束 " + this.remainingTimeString(now, timer.rawEnd, 5);
+                    timer.dateDisplay.badgeEnd = "结束于 " + this.remainingTimeString(now, timer.rawEnd, 5) + " 前";
+                    timer.dateDisplay.badgeStart = "开始于 " + this.remainingTimeString(now, timer.rawStart, 5) + " 前";
                 } else {
-                    timer.dateDisplay.barLabel = "Ends in " + this.remainingTimeString(now, timer.rawEnd, 2) + (timer.type == "weekend" ? "" : " (" + timer.progress.toFixed(1) + "%)");
-                    timer.dateDisplay.badgeEnd = "Ends in " + this.remainingTimeString(now, timer.rawEnd, 5);
-                    timer.dateDisplay.badgeStart = "Started " + this.remainingTimeString(now, timer.rawStart, 5) + " ago";
+                    timer.dateDisplay.barLabel = "剩余 " + this.remainingTimeString(now, timer.rawEnd, 2) + (timer.type == "weekend" ? "" : "（" + timer.progress.toFixed(1) + "%）");
+                    timer.dateDisplay.badgeEnd = this.remainingTimeString(now, timer.rawEnd, 5) + " 后结束";
+                    timer.dateDisplay.badgeStart = "已开始 " + this.remainingTimeString(now, timer.rawStart, 5);
 
                     // Increase priority if timer is active
                     if (timer.extraPriority) {
@@ -477,7 +484,7 @@ var vm = new Vue({
                     var marks = timer.markersInfo, m, mark, next = Infinity, nextName, nextFound = false;
                     for (m = 0; m < marks.length; m++) {
                         mark = marks[m];
-                        mark.tip = "<b>" + mark.label + "</b><br/>" + (timer.displayMode == "japan" ? mark.jptime : mark.localtime) + (now >= mark.rawtime ? "" : "<br/>(starts in " + this.remainingTimeString(now, mark.rawtime, 5) + ")");
+                        mark.tip = "<b>" + mark.label + "</b><br/>" + (timer.displayMode == "japan" ? mark.jptime : mark.localtime) + (now >= mark.rawtime ? "" : "<br/>（" + this.remainingTimeString(now, mark.rawtime, 5) + " 后开始）");
                         if (mark.rawtime > now && mark.rawtime < next) {
                             nextFound = true;
                             nextName = mark.label;
@@ -489,7 +496,7 @@ var vm = new Vue({
                         }
                     }
                     if (nextFound && now >= timer.rawStart) {
-                        timer.nextMarker = nextName + " starts in " + this.remainingTimeString(now, next, 5);
+                        timer.nextMarker = nextName + " 将在 " + this.remainingTimeString(now, next, 5) + " 后开始";
                     } else {
                         timer.nextMarker = "";
                     }
@@ -497,6 +504,7 @@ var vm = new Vue({
                     timer.nextMarker = "";
                 }
             }
+            return timer.visible && timer.type != "weekend";
         },
 
         // HELPER FUNCTIONS
@@ -537,12 +545,35 @@ var vm = new Vue({
                 return elapsed / duration * 100;
             }
         },
+        parseMoment: function (str) {
+            var formats = [
+                "MMMM D YYYY, H:mm",
+                "MMM D YYYY, H:mm",
+                "MMMM D YYYY",
+                "MMM D YYYY"
+            ];
+            var parsed = moment.tz(str, formats, "en", true, "Asia/Tokyo");
+            if (parsed.isValid()) {
+                return parsed;
+            }
+            var match = /^(\d{1,2})月\s*(\d{1,2})日\s*(\d{4})(?:,\s*(\d{1,2}):(\d{2}))?$/.exec(String(str).trim());
+            if (match) {
+                return moment.tz({
+                    year: Number(match[3]),
+                    month: Number(match[1]) - 1,
+                    day: Number(match[2]),
+                    hour: Number(match[4] || 0),
+                    minute: Number(match[5] || 0)
+                }, "Asia/Tokyo");
+            }
+            return moment.invalid();
+        },
         timeDescription: function (time, steps) {
             var sec = time / 1000;
 
             var s = [];
             var n;
-            var d = [[24 * 60 * 60, "天"], [60 * 60, "时"], [60, "分"], [1, "秒"]];
+            var d = [[24 * 60 * 60, "天"], [60 * 60, "小时"], [60, "分"], [1, "秒"]];
             for (var j = 0; j < 4; ++j) {
                 n = parseInt(sec / d[j][0], 10);
                 if (n > 0) {
@@ -578,3 +609,123 @@ var vm = new Vue({
         setInterval(this.updateClocks, 1 * 1000);
     }
 });
+
+(function () {
+    var offerings = [
+        { message: "你为琪拉拉献上了一束星光", image: "imgs/kirara_b.png" },
+        { message: "你为兰普献上了一束星光", image: "imgs/lamp_b.png" },
+        { message: "你为克蕾雅献上了一束星光", image: "imgs/clea_b.png" }
+    ];
+    var storageKey = "kirafan-offering-count";
+    var closeTimer;
+
+    function readOfferingCount() {
+        try {
+            return Number(window.localStorage.getItem(storageKey)) || 0;
+        } catch (error) {
+            return 0;
+        }
+    }
+
+    function writeOfferingCount(count) {
+        try {
+            window.localStorage.setItem(storageKey, String(count));
+        } catch (error) {
+            return;
+        }
+    }
+
+    function initOffering() {
+        var button = document.getElementById("offeringButton");
+        var modal = document.getElementById("offeringModal");
+        var image = document.getElementById("offeringImage");
+        var message = document.getElementById("offeringMessage");
+        var countLabel = document.getElementById("offeringCount");
+        var count = readOfferingCount();
+
+        if (!button || !modal || !image || !message || !countLabel) {
+            return;
+        }
+
+        function renderCount() {
+            countLabel.textContent = count > 0 ? "你已献上 " + count + " 次" : "";
+        }
+
+        function closeOffering() {
+            window.clearTimeout(closeTimer);
+            modal.classList.remove("is-visible");
+            window.setTimeout(function () {
+                modal.hidden = true;
+            }, 240);
+        }
+
+        button.addEventListener("click", function () {
+            var offering = offerings[Math.floor(Math.random() * offerings.length)];
+            count += 1;
+            writeOfferingCount(count);
+            renderCount();
+            image.src = offering.image;
+            image.alt = offering.message;
+            message.textContent = offering.message;
+            modal.hidden = false;
+            window.requestAnimationFrame(function () {
+                modal.classList.add("is-visible");
+            });
+            closeTimer = window.setTimeout(closeOffering, 2600);
+        });
+
+        modal.querySelectorAll("[data-close-offering]").forEach(function (element) {
+            element.addEventListener("click", closeOffering);
+        });
+        document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape" && !modal.hidden) {
+                closeOffering();
+            }
+        });
+        renderCount();
+    }
+
+    function markCounterUnavailable() {
+        ["vercount_value_site_uv", "vercount_value_site_pv"].forEach(function (id) {
+            var element = document.getElementById(id);
+            if (element && element.textContent.trim() === "读取中") {
+                element.textContent = "暂不可用";
+                element.classList.add("is-unavailable");
+            }
+        });
+    }
+
+    window.handleVisitorCounterError = markCounterUnavailable;
+
+    document.addEventListener("DOMContentLoaded", function () {
+        initOffering();
+        window.setTimeout(markCounterUnavailable, 6000);
+        initGiscus();
+    });
+
+    function initGiscus() {
+        var config = window.kirafanGiscus;
+        var target = document.getElementById("giscusThread");
+        var setupNotice = document.getElementById("giscusSetupNotice");
+        if (!config || !target || !setupNotice) {
+            return;
+        }
+        if (!config.categoryId) {
+            setupNotice.hidden = false;
+            return;
+        }
+
+        var script = document.createElement("script");
+        script.src = "https://giscus.app/client.js";
+        script.async = true;
+        script.crossOrigin = "anonymous";
+        Object.keys(config).forEach(function (key) {
+            if (key === "categoryId") {
+                script.dataset.categoryId = config[key];
+                return;
+            }
+            script.dataset[key] = config[key];
+        });
+        target.appendChild(script);
+    }
+})();
