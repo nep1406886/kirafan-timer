@@ -68,6 +68,46 @@ var vm = new Vue({
         alertTypes: alertTypes,
         shutdownArtworks: []
     },
+    computed: {
+        visibleTimerColumns: function () {
+            if (!this.timersData) {
+                return [];
+            }
+            return this.timersData.filter(function (column) {
+                return column.some(function (event) {
+                    return event.visible;
+                });
+            });
+        },
+        orderedArtworks: function () {
+            var firstRowIds = [
+                "1654459077186183169",
+                "1630463141850288128",
+                "1630512055827730432"
+            ];
+            var firstRow = [];
+            var remaining = [];
+
+            this.shutdownArtworks.forEach(function (artwork) {
+                if (firstRowIds.indexOf(artwork.id) !== -1) {
+                    firstRow.push(artwork);
+                } else {
+                    remaining.push(artwork);
+                }
+            });
+            firstRow.sort(function (a, b) {
+                return firstRowIds.indexOf(a.id) - firstRowIds.indexOf(b.id);
+            });
+
+            return firstRow.concat(remaining);
+        },
+        featuredArtworks: function () {
+            return this.orderedArtworks.slice(0, 3);
+        },
+        archiveArtworks: function () {
+            return this.orderedArtworks.slice(3);
+        }
+    },
     methods: {
         changeTimezone: function () {
             var c, t, e, col, ev, timer, data = this.timersData;
@@ -257,6 +297,7 @@ var vm = new Vue({
             timer.rawStart = startMoment._d.getTime();
             timer.rawEnd = endMoment._d.getTime();
             timer.operationDuration = this.timeDescription(timer.rawEnd - timer.rawStart, 4);
+            timer.sinceStart = "";
             timer.sinceEnd = "";
 
             // Creates markers
@@ -454,6 +495,9 @@ var vm = new Vue({
             // Check if timer should be visible
             timer.visible = false;
             timer.progress = this.countProgress(now, timer.rawStart, timer.rawEnd);
+            timer.sinceStart = now >= timer.rawStart
+                ? this.timeDescription(now - timer.rawStart, 4)
+                : this.timeDescription(timer.rawStart - now, 4) + " 后";
             timer.sinceEnd = now >= timer.rawEnd
                 ? this.timeDescription(now - timer.rawEnd, 4)
                 : this.timeDescription(timer.rawEnd - now, 4) + " 后";
@@ -609,26 +653,16 @@ var vm = new Vue({
 
         setInterval(this.updateClocks, 1 * 1000);
 
-        // Fetch artworks.json
-        fetch('asset/shutdown-artworks/artworks.json')
-            .then(response => response.json())
-            .then(data => {
-                this.shutdownArtworks = data.items;
-            })
-            .catch(error => {
-                console.error('Error loading artworks.json:', error);
-            });
+        // Load artworks from static JS (pure static site, no fetch needed)
+        this.shutdownArtworks = (window.kirafanShutdownArtworks && window.kirafanShutdownArtworks.items) || [];
     }
 });
 
 (function () {
-    var offerings = [
-        { message: "你为琪拉拉上了一炷香", image: "imgs/kirara_b.png" },
-        { message: "你为兰普上了一炷香", image: "imgs/lamp_b.png" },
-        { message: "你为克蕾雅上了一炷香", image: "imgs/clea_b.png" }
-    ];
+    var offerings = window.kirafanOriginalCharacters || [];
     var storageKey = "kirafan-offering-count";
     var closeTimer;
+    var lastOfferingIndex = -1;
 
     function readOfferingCount() {
         try {
@@ -646,15 +680,72 @@ var vm = new Vue({
         }
     }
 
+    // 点击上香时，在龛位内升起一小片星光
+    function playOfferingEffect(shrine) {
+        if (!shrine) {
+            return;
+        }
+
+        shrine.classList.remove("is-offering");
+        // 强制重排，保证连续点击时脉冲动画能重新播放
+        void shrine.offsetWidth;
+        shrine.classList.add("is-offering");
+        window.setTimeout(function () {
+            shrine.classList.remove("is-offering");
+        }, 900);
+
+        var layer = shrine.querySelector(".spark-layer");
+        if (!layer) {
+            layer = document.createElement("div");
+            layer.className = "spark-layer";
+            layer.setAttribute("aria-hidden", "true");
+            shrine.appendChild(layer);
+        }
+
+        var wave = document.createElement("span");
+        wave.className = "offering-wave";
+        layer.appendChild(wave);
+
+        for (var i = 0; i < 16; i++) {
+            var spark = document.createElement("span");
+            var isPetal = i % 5 === 0;
+            spark.className = isPetal ? "spark spark-petal" : "spark";
+            spark.textContent = isPetal ? "◆" : (i % 3 === 0 ? "✦" : "✧");
+            spark.style.left = (10 + Math.random() * 80) + "%";
+            spark.style.bottom = (10 + Math.random() * 24) + "%";
+            spark.style.fontSize = (7 + Math.random() * 9).toFixed(1) + "px";
+            spark.style.animationDelay = (Math.random() * 260).toFixed(0) + "ms";
+            spark.style.animationDuration = (1200 + Math.random() * 700).toFixed(0) + "ms";
+            layer.appendChild(spark);
+        }
+
+        window.setTimeout(function () {
+            while (layer.firstChild) {
+                layer.removeChild(layer.firstChild);
+            }
+        }, 2400);
+    }
+
     function initOffering() {
         var button = document.getElementById("offeringButton");
+        var shrine = document.getElementById("action-and-counter-holder");
         var modal = document.getElementById("offeringModal");
         var image = document.getElementById("offeringImage");
+        var characterName = document.getElementById("offeringName");
+        var characterJapanese = document.getElementById("offeringJapanese");
+        var characterRomaji = document.getElementById("offeringRomaji");
+        var characterChinese = document.getElementById("offeringChinese");
+        var characterWiki = document.getElementById("offeringWiki");
+        var characterGroup = document.getElementById("offeringGroup");
+        var characterCv = document.getElementById("offeringCv");
+        var characterArtist = document.getElementById("offeringArtist");
+        var characterSeries = document.getElementById("offeringSeries");
         var message = document.getElementById("offeringMessage");
+        var messageName = document.getElementById("offeringMessageName");
         var countLabel = document.getElementById("offeringCount");
         var count = readOfferingCount();
 
-        if (!button || !modal || !image || !message || !countLabel) {
+        if (!button || !modal || !image || !characterName || !characterJapanese || !characterRomaji || !characterChinese || !characterWiki || !characterGroup || !characterCv || !characterArtist || !characterSeries || !message || !messageName || !countLabel || offerings.length === 0) {
             return;
         }
 
@@ -671,22 +762,43 @@ var vm = new Vue({
         }
 
         button.addEventListener("click", function () {
-            var offering = offerings[Math.floor(Math.random() * offerings.length)];
+            var offeringIndex = Math.floor(Math.random() * offerings.length);
+            if (offerings.length > 1 && offeringIndex === lastOfferingIndex) {
+                offeringIndex = (offeringIndex + 1 + Math.floor(Math.random() * (offerings.length - 1))) % offerings.length;
+            }
+            lastOfferingIndex = offeringIndex;
+            var offering = offerings[offeringIndex];
             count += 1;
             writeOfferingCount(count);
             renderCount();
+            playOfferingEffect(shrine);
+            modal.classList.remove("is-revealing");
+            void modal.offsetWidth;
+            characterJapanese.textContent = offering.japanese;
+            characterRomaji.textContent = offering.romaji;
+            characterChinese.textContent = offering.chinese || "";
+            characterChinese.hidden = !offering.chinese;
+            characterWiki.href = offering.wikiUrl;
+            characterGroup.textContent = offering.group + " · 原创角色";
+            characterCv.textContent = offering.cv || "未公开";
+            characterArtist.textContent = offering.artist || "未公开";
+            characterSeries.textContent = offering.series || "きららファンタジア";
+            messageName.textContent = offering.japanese;
+            image.alt = offering.japanese + (offering.chinese ? " / " + offering.chinese : "");
             image.src = offering.image;
-            image.alt = offering.message;
-            message.textContent = offering.message;
             modal.hidden = false;
             window.requestAnimationFrame(function () {
                 modal.classList.add("is-visible");
+                modal.classList.add("is-revealing");
             });
-            closeTimer = window.setTimeout(closeOffering, 2600);
+            closeTimer = window.setTimeout(closeOffering, 8000);
         });
 
         modal.querySelectorAll("[data-close-offering]").forEach(function (element) {
             element.addEventListener("click", closeOffering);
+        });
+        modal.addEventListener("click", function (event) {
+            closeOffering();
         });
         document.addEventListener("keydown", function (event) {
             if (event.key === "Escape" && !modal.hidden) {

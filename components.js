@@ -41,11 +41,19 @@ Vue.component("ev-content", {
 
 Vue.component("memorial-timer", {
     props: ["timer"],
-    template: `<section class='memorial-timer' aria-label='琪拉拉幻想曲运营时间'>
+    template: `<section class='memorial-timer' aria-label='闪耀幻想曲运营时间'>
         <div class='memorial-primary'>
-            <span class='memorial-eyebrow'>停服至今</span>
-            <strong class='memorial-elapsed'>{{ timer.sinceEnd }}</strong>
-            <span class='memorial-status'>离线版仍可继续游玩</span>
+            <div class='memorial-elapsed-item'>
+                <span class='memorial-eyebrow'>开服至今</span>
+                <strong class='memorial-elapsed'>{{ timer.sinceStart }}</strong>
+                <span class='memorial-status'>从第一次被抽卡妹诈骗开始</span>
+            </div>
+            <div class='memorial-elapsed-divider' aria-hidden='true'></div>
+            <div class='memorial-elapsed-item'>
+                <span class='memorial-eyebrow'>停服至今</span>
+                <strong class='memorial-elapsed'>{{ timer.sinceEnd }}</strong>
+                <span class='memorial-status'>没事干可以多看看骨灰盒</span>
+            </div>
         </div>
         <div class='memorial-facts'>
             <div class='memorial-fact'>
@@ -244,7 +252,7 @@ Vue.component("ev-thumb", {
                 case "weekendboss":
                     return "Weekend Boss";
                 case "memorial":
-                    return "纪念";
+                    return "永远怀念";
                 default:
                     return value.charAt(0).toUpperCase() + value.slice(1);
             }

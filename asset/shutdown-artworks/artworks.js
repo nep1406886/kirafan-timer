@@ -1,4 +1,3 @@
-// Generated from artworks.json. Edit the JSON source, then regenerate this file.
 var kirafanShutdownArtworks = {
   "schemaVersion": 1,
   "title": "《きららファンタジア》关服纪念画师帖整理",
@@ -45,27 +44,27 @@ var kirafanShutdownArtworks = {
       ]
     },
     {
-      "id": "1630571298090020865",
-      "postedAt": "2023-02-28T23:11:06+09:00",
+      "id": "1630463141850288128",
+      "postedAt": "2023-02-28T16:01:20+09:00",
       "author": {
-        "name": "はんざわかおり",
-        "handle": "hankao42",
-        "role": "《Comic Girls》作者"
+        "name": "こうのす",
+        "handle": "test_to_",
+        "role": "Kirara 系创作者、《こみっくがーるずアンソロジーコミック》参与作者"
       },
-      "work": "Comic Girls",
-      "postUrl": "https://x.com/hankao42/status/1630571298090020865",
-      "textJa": "こみっくがーるずもきららファンタジアも終わって今とても心がぽっかり…でもみんなずっと大好き、出会えてしあわせ💝\n本当にありがとうございました！お疲れ様でした！\n#きららファンタジア",
-      "textZh": "《Comic Girls》和《Kirara Fantasia》都结束了，现在心里空落落的……但我会一直喜欢大家，能够相遇很幸福。真的非常感谢！辛苦了！",
-      "mediaNote": "关服纪念插画。",
+      "work": "Kirara 系相关",
+      "postUrl": "https://x.com/test_to_/status/1630463141850288128",
+      "textJa": "#きららファンタジア",
+      "textZh": "#KiraraFantasia",
+      "mediaNote": "停服时刻发布的纪念插画；同作者紧接着发布了回顾博文。",
       "images": [
         {
-          "path": "images/hanzawa-kaori-1630571298090020865-01.jpg",
-          "sourceUrl": "https://pbs.twimg.com/media/FqDz808aEAAh9uH.jpg?name=orig",
+          "path": "images/kounosu-1630463141850288128-01.jpg",
+          "sourceUrl": "https://pbs.twimg.com/media/FqCRk6caUAEUzfr.jpg?name=orig",
           "mediaKind": "artwork",
-          "width": 1749,
-          "height": 1200,
-          "bytes": 243188,
-          "sha256": "449cb31a2cf995df743d3d4a7e5be4a239c6a89ca7c82deede1263dbcd758811"
+          "width": 1199,
+          "height": 812,
+          "bytes": 139434,
+          "sha256": "0110910a401f65e799b7fe0d9b0b59c3a7c81a955214f9882742771d10ddbd58"
         }
       ]
     },
@@ -95,6 +94,31 @@ var kirafanShutdownArtworks = {
       ]
     },
     {
+      "id": "1630571298090020865",
+      "postedAt": "2023-02-28T23:11:06+09:00",
+      "author": {
+        "name": "はんざわかおり",
+        "handle": "hankao42",
+        "role": "《Comic Girls》作者"
+      },
+      "work": "Comic Girls",
+      "postUrl": "https://x.com/hankao42/status/1630571298090020865",
+      "textJa": "こみっくがーるずもきららファンタジアも終わって今とても心がぽっかり…でもみんなずっと大好き、出会えてしあわせ💝\n本当にありがとうございました！お疲れ様でした！\n#きららファンタジア",
+      "textZh": "《Comic Girls》和《Kirara Fantasia》都结束了，现在心里空落落的……但我会一直喜欢大家，能够相遇很幸福。真的非常感谢！辛苦了！",
+      "mediaNote": "关服纪念插画。",
+      "images": [
+        {
+          "path": "images/hanzawa-kaori-1630571298090020865-01.jpg",
+          "sourceUrl": "https://pbs.twimg.com/media/FqDz808aEAAh9uH.jpg?name=orig",
+          "mediaKind": "artwork",
+          "width": 1749,
+          "height": 1200,
+          "bytes": 243188,
+          "sha256": "449cb31a2cf995df743d3d4a7e5be4a239c6a89ca7c82deede1263dbcd758811"
+        }
+      ]
+    },
+    {
       "id": "1630426039100010497",
       "postedAt": "2023-02-28T13:33:54+09:00",
       "author": {
@@ -116,31 +140,6 @@ var kirafanShutdownArtworks = {
           "height": 999,
           "bytes": 96177,
           "sha256": "8ffa46fc6b3f2968db67c297141ca950f6be5da5868c877d406536130b94caf7"
-        }
-      ]
-    },
-    {
-      "id": "1630463141850288128",
-      "postedAt": "2023-02-28T16:01:20+09:00",
-      "author": {
-        "name": "こうのす",
-        "handle": "test_to_",
-        "role": "Kirara 系创作者、《こみっくがーるずアンソロジーコミック》参与作者"
-      },
-      "work": "Kirara 系相关",
-      "postUrl": "https://x.com/test_to_/status/1630463141850288128",
-      "textJa": "#きららファンタジア",
-      "textZh": "#KiraraFantasia",
-      "mediaNote": "停服时刻发布的纪念插画；同作者紧接着发布了回顾博文。",
-      "images": [
-        {
-          "path": "images/kounosu-1630463141850288128-01.jpg",
-          "sourceUrl": "https://pbs.twimg.com/media/FqCRk6caUAEUzfr.jpg?name=orig",
-          "mediaKind": "artwork",
-          "width": 1199,
-          "height": 812,
-          "bytes": 139434,
-          "sha256": "0110910a401f65e799b7fe0d9b0b59c3a7c81a955214f9882742771d10ddbd58"
         }
       ]
     },
