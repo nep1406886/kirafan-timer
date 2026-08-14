@@ -39,7 +39,7 @@ const cards = characters
     .filter((card) => card.m_CharaID % 10 === 0)
     .filter((card) => {
         const named = namedById.get(card.m_NamedType);
-        return named && named.m_TitleType !== ORIGINAL_TITLE_TYPE && named.originalCharaID == null;
+        return Boolean(named);
     })
     .map((card) => {
         const named = namedById.get(card.m_NamedType);
@@ -82,11 +82,19 @@ const cardIds = new Set(cards.map((card) => card.id));
 const characterIds = new Set(cards.map((card) => card.namedType));
 const includedTitleIds = new Set(cards.map((card) => card.titleId));
 const evolutionCount = cards.filter((card) => card.evolvedId !== null).length;
+const originalCards = cards.filter((card) => card.titleId === ORIGINAL_TITLE_TYPE);
+const originalCharacterIds = new Set(originalCards.map((card) => card.namedType));
 
 if (cardIds.size !== cards.length) {
     throw new Error("Duplicate card IDs found in generated gacha data");
 }
-if (cards.length < 600 || characterIds.size < 200 || includedTitleIds.has(ORIGINAL_TITLE_TYPE)) {
+if (
+    cards.length < 680 ||
+    characterIds.size < 240 ||
+    !includedTitleIds.has(ORIGINAL_TITLE_TYPE) ||
+    originalCards.length !== 51 ||
+    originalCharacterIds.size !== 21
+) {
     throw new Error("Generated data failed completeness or original-character checks");
 }
 
@@ -107,7 +115,9 @@ const payload = {
         characterCount: characterIds.size,
         titleCount: includedTitles.length,
         evolutionCount,
-        excludedTitleType: ORIGINAL_TITLE_TYPE,
+        originalTitleType: ORIGINAL_TITLE_TYPE,
+        originalCardCount: originalCards.length,
+        originalCharacterCount: originalCharacterIds.size,
         sources: [
             "https://database.kirafan.cn/database/CharacterList.json",
             "https://database.kirafan.cn/database/NamedList.json",

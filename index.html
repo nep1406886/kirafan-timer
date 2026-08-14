@@ -20,11 +20,13 @@
     <script src="https://cdn.jsdelivr.net/npm/vue@2.5.17/dist/vue.min.js"></script>
     <script type="text/javascript" src="components.js?v=20260813-5"></script>
 
+    <link rel="preload" as="image" href="imgs/op1900.jpg">
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.0/css/bootstrap.min.css" integrity="sha384-9gVQ4dYFwwWSjIDZnLEWnxCjeSWFphJiwGPXr1jddIhOegiu1FwO5qRGvFXOdJZ4" crossorigin="anonymous">
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.1.0/js/bootstrap.min.js" integrity="sha384-uefMccjFJAIv6A+rW+L4AHf99KvxDjWSu1z9VI8SKNVmz4sk7buKt/6v9KI65qnm" crossorigin="anonymous"></script>
 
     <link rel="stylesheet" type="text/css" href="style.css?v=20260813-7">
-    <link rel="stylesheet" type="text/css" href="css/memorial.css?v=20260814-1">
+    <link rel="stylesheet" type="text/css" href="css/memorial.css?v=20260814-27">
+    <link rel="stylesheet" type="text/css" href="css/official-theme.css?v=20260814-17">
 
     <link rel="icon" href="favicon.png">
 </head>
@@ -34,9 +36,11 @@
         <div class="memorial-stage">
         <div id="header" v-show="showHeader">
             <div class="hero-copy">
-                <span class="hero-kicker">KIRARA FANTASIA · 2017—2023</span>
-                <h1>闪耀幻想曲<br>纪念计时器</h1>
+                <img class="hero-main-logo" src="imgs/official-site/kirarafantasia-logo.svg" alt="きららファンタジア">
+                <span class="hero-kicker">MEMORIAL TIMER / 2017—2023</span>
+                <h1>闪耀幻想曲<span>纪念计时器</span></h1>
                 <p>故事已经停在那一天，留下的时间仍在继续。</p>
+                <span class="hero-color-bars" aria-hidden="true"></span>
             </div>
 
             <div class="alert-container" :class='{ alertsshow: alerts.length > 0 }'>
@@ -65,12 +69,10 @@
                         <span></span><span></span><span></span><span></span><span></span>
                     </div>
                     <div class="incense-stick" aria-hidden="true">
-                        <div class="smoke" aria-hidden="true">
-                            <span></span><span></span><span></span>
-                        </div>
                     </div>
                     <div class="incense-burner" aria-hidden="true">
                         <span class="burner-rim"></span>
+                        <span class="burner-ash"></span>
                         <span class="burner-mark">✦</span>
                     </div>
                     <div class="memorial-action">
@@ -94,6 +96,61 @@
         </div>
         </main>
         </div>
+
+        <section class="official-roster" aria-labelledby="officialRosterTitle">
+            <div class="official-roster-inner">
+                <div class="official-roster-copy">
+                    <img class="official-roster-logo" src="imgs/official-site/kirarafantasia-logo.svg" alt="きららファンタジア">
+                    <span>OFFICIAL VISUAL ARCHIVE / 2021—2023</span>
+                    <h2 id="officialRosterTitle">官网留下的星光，仍在轮转。</h2>
+                    <p>收录停服前官网留下的原创角色群像与历年主视觉，让那些曾经照亮艾特瓦利亚的相遇继续留在这里。</p>
+                </div>
+                <section class="official-hero-carousel" id="officialHeroCarousel" aria-label="官网主视觉轮播" aria-roledescription="轮播">
+                    <div class="official-hero-slides" aria-live="off">
+                        <figure class="official-hero-slide is-active" data-slide-index="0" aria-hidden="false">
+                            <picture>
+                                <img src="imgs/official-site/official-original-cast.png" alt="闪耀幻想曲原创角色群像" width="1646" height="904" loading="eager" decoding="async">
+                            </picture>
+                        </figure>
+                        <figure class="official-hero-slide" data-slide-index="1" aria-hidden="true">
+                            <picture>
+                                <img data-src="imgs/official-site/hero/hero-01-pc.png" alt="官网主视觉：在艾特瓦利亚相遇的角色们" width="1646" height="904" decoding="async">
+                            </picture>
+                        </figure>
+                        <figure class="official-hero-slide" data-slide-index="2" aria-hidden="true">
+                            <picture>
+                                <img data-src="imgs/official-site/hero/hero-02-pc.png" alt="官网主视觉：夏日装束的角色们" width="1646" height="904" decoding="async">
+                            </picture>
+                        </figure>
+                        <figure class="official-hero-slide" data-slide-index="3" aria-hidden="true">
+                            <picture>
+                                <img data-src="imgs/official-site/hero/hero-03-pc.png" alt="官网主视觉：冒险装束的角色们" width="1646" height="904" decoding="async">
+                            </picture>
+                        </figure>
+                        <figure class="official-hero-slide" data-slide-index="4" aria-hidden="true">
+                            <picture>
+                                <img data-src="imgs/official-site/hero/hero-04-pc.png" alt="官网主视觉：创作者与原创角色们" width="1646" height="904" decoding="async">
+                            </picture>
+                        </figure>
+                        <figure class="official-hero-slide" data-slide-index="5" aria-hidden="true">
+                            <picture>
+                                <img data-src="imgs/official-site/hero/hero-05-pc.png" alt="官网主视觉：闪耀幻想曲原创角色们" width="1646" height="904" decoding="async">
+                            </picture>
+                        </figure>
+                    </div>
+                    <span class="official-hero-sweep" aria-hidden="true"></span>
+                    <div class="official-hero-dots" role="group" aria-label="选择主视觉">
+                        <button class="is-active" type="button" data-hero-slide="0" aria-label="显示第 1 张主视觉" aria-current="true"></button>
+                        <button type="button" data-hero-slide="1" aria-label="显示第 2 张主视觉"></button>
+                        <button type="button" data-hero-slide="2" aria-label="显示第 3 张主视觉"></button>
+                        <button type="button" data-hero-slide="3" aria-label="显示第 4 张主视觉"></button>
+                        <button type="button" data-hero-slide="4" aria-label="显示第 5 张主视觉"></button>
+                        <button type="button" data-hero-slide="5" aria-label="显示第 6 张主视觉"></button>
+                    </div>
+                    <span class="official-hero-source">OFFICIAL VISUAL / WEB ARCHIVE</span>
+                </section>
+            </div>
+        </section>
 
         <main class="archive-main">
         <section class="memory-section" aria-labelledby="memoryTitle">
@@ -183,7 +240,7 @@
             </div>
         </div>
     </div>
-    <script type="text/javascript" src="app.js?v=20260814-2"></script>
+    <script type="text/javascript" src="app.js?v=20260814-25"></script>
     <script defer src="https://events.vercount.one/js" onerror="window.handleVisitorCounterError && window.handleVisitorCounterError()"></script>
     <script>
         window.kirafanGiscus = {

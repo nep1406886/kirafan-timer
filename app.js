@@ -659,10 +659,264 @@ var vm = new Vue({
 });
 
 (function () {
+    function initOfficialHeroCarousel() {
+        var root = document.getElementById("officialHeroCarousel");
+        if (!root) {
+            return;
+        }
+
+        var slides = Array.prototype.slice.call(root.querySelectorAll(".official-hero-slide"));
+        var dots = Array.prototype.slice.call(root.querySelectorAll("[data-hero-slide]"));
+        var activeIndex = 0;
+        var changeRequest = 0;
+        var autoplayTimer;
+        var touchStartX = null;
+        var autoplayDelay = 5200;
+        var transitionTimer;
+        var slideCleanupTimer;
+
+        if (slides.length < 2) {
+            return;
+        }
+
+        function normalizedIndex(index) {
+            return (index + slides.length) % slides.length;
+        }
+
+        function hydrateSlide(index) {
+            var slide = slides[normalizedIndex(index)];
+            var image = slide.querySelector("img");
+            var sources = slide.querySelectorAll("source[data-srcset]");
+
+            if (!image) {
+                return Promise.resolve(false);
+            }
+            if (slide.dataset.loaded === "true" && image.complete && image.naturalWidth > 0) {
+                return Promise.resolve(true);
+            }
+
+            Array.prototype.forEach.call(sources, function (source) {
+                source.srcset = source.dataset.srcset;
+                source.removeAttribute("data-srcset");
+            });
+            if (image.dataset.src) {
+                image.src = image.dataset.src;
+                image.removeAttribute("data-src");
+            }
+
+            return new Promise(function (resolve) {
+                var settled = false;
+
+                function finish(loaded) {
+                    if (settled) {
+                        return;
+                    }
+                    settled = true;
+                    image.removeEventListener("load", onLoad);
+                    image.removeEventListener("error", onError);
+
+                    if (!loaded) {
+                        slide.dataset.loadFailed = "true";
+                        resolve(false);
+                        return;
+                    }
+
+                    var decoded = typeof image.decode === "function"
+                        ? image.decode().catch(function () { return; })
+                        : Promise.resolve();
+                    decoded.then(function () {
+                        slide.dataset.loaded = "true";
+                        resolve(true);
+                    });
+                }
+
+                function onLoad() {
+                    finish(true);
+                }
+
+                function onError() {
+                    finish(false);
+                }
+
+                image.addEventListener("load", onLoad, { once: true });
+                image.addEventListener("error", onError, { once: true });
+                if (image.complete) {
+                    finish(image.naturalWidth > 0);
+                }
+            });
+        }
+
+        function updateControls() {
+            dots.forEach(function (dot, index) {
+                var isActive = index === activeIndex;
+                dot.classList.toggle("is-active", isActive);
+                if (isActive) {
+                    dot.setAttribute("aria-current", "true");
+                } else {
+                    dot.removeAttribute("aria-current");
+                }
+            });
+        }
+
+        function canAutoplay() {
+            return !document.hidden;
+        }
+
+        function resetAutoplay() {
+            window.clearTimeout(autoplayTimer);
+            var autoplayEnabled = canAutoplay();
+            root.classList.toggle("is-autoplay-paused", !autoplayEnabled);
+            if (!autoplayEnabled) {
+                return;
+            }
+            var activeDot = dots[activeIndex];
+            if (activeDot) {
+                activeDot.classList.remove("is-active");
+                void activeDot.offsetWidth;
+                activeDot.classList.add("is-active");
+            }
+            autoplayTimer = window.setTimeout(function () {
+                showSlide(activeIndex + 1);
+            }, autoplayDelay);
+        }
+
+        function playHeroTransition() {
+            window.clearTimeout(transitionTimer);
+            root.classList.remove("is-transitioning");
+            void root.offsetWidth;
+            root.classList.add("is-transitioning");
+            transitionTimer = window.setTimeout(function () {
+                root.classList.remove("is-transitioning");
+            }, 1100);
+        }
+
+        function showSlide(index) {
+            var nextIndex = normalizedIndex(index);
+            var request = ++changeRequest;
+
+            if (nextIndex === activeIndex) {
+                resetAutoplay();
+                return;
+            }
+
+            root.setAttribute("aria-busy", "true");
+            hydrateSlide(nextIndex).then(function (loaded) {
+                if (request !== changeRequest) {
+                    return;
+                }
+                root.removeAttribute("aria-busy");
+                if (!loaded) {
+                    resetAutoplay();
+                    return;
+                }
+
+                window.clearTimeout(slideCleanupTimer);
+                slides.forEach(function (slide) {
+                    slide.classList.remove("is-leaving");
+                });
+                slides[activeIndex].classList.add("is-leaving");
+                slides[activeIndex].classList.remove("is-active");
+                slides[activeIndex].setAttribute("aria-hidden", "true");
+                slides[nextIndex].classList.add("is-active");
+                slides[nextIndex].setAttribute("aria-hidden", "false");
+                activeIndex = nextIndex;
+                updateControls();
+                playHeroTransition();
+
+                slideCleanupTimer = window.setTimeout(function () {
+                    slides.forEach(function (slide) {
+                        slide.classList.remove("is-leaving");
+                    });
+                }, 950);
+
+                hydrateSlide(activeIndex + 1);
+                resetAutoplay();
+            });
+        }
+
+        root.addEventListener("click", function (event) {
+            var slideControl = event.target.closest("[data-hero-slide]");
+            if (slideControl && root.contains(slideControl)) {
+                showSlide(Number(slideControl.dataset.heroSlide));
+            }
+        });
+
+        root.addEventListener("touchstart", function (event) {
+            touchStartX = event.touches.length === 1 ? event.touches[0].clientX : null;
+        }, { passive: true });
+        root.addEventListener("touchend", function (event) {
+            if (touchStartX === null || event.changedTouches.length !== 1) {
+                touchStartX = null;
+                return;
+            }
+            var distance = event.changedTouches[0].clientX - touchStartX;
+            touchStartX = null;
+            if (Math.abs(distance) >= 44) {
+                showSlide(activeIndex + (distance < 0 ? 1 : -1));
+            }
+        }, { passive: true });
+        document.addEventListener("visibilitychange", resetAutoplay);
+
+        hydrateSlide(0).then(function () {
+            hydrateSlide(1);
+            resetAutoplay();
+        });
+    }
+
+    document.addEventListener("DOMContentLoaded", initOfficialHeroCarousel);
+})();
+
+(function () {
+    function initScrollReveals() {
+        var items = Array.prototype.slice.call(document.querySelectorAll(
+            ".official-roster-copy, .official-hero-carousel, .section-heading, .memory-card, .comments-frame"
+        ));
+
+        if (!items.length) {
+            return;
+        }
+
+        items.forEach(function (item, index) {
+            item.classList.add("motion-reveal");
+            item.style.setProperty("--motion-delay", ((index % 6) * 70) + "ms");
+        });
+
+        if (!("IntersectionObserver" in window)) {
+            items.forEach(function (item) {
+                item.classList.add("is-in-view");
+            });
+            return;
+        }
+
+        var observer = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) {
+                if (!entry.isIntersecting) {
+                    return;
+                }
+                entry.target.classList.add("is-in-view");
+                observer.unobserve(entry.target);
+            });
+        }, {
+            rootMargin: "0px 0px -8% 0px",
+            threshold: 0.08
+        });
+
+        items.forEach(function (item) {
+            observer.observe(item);
+        });
+    }
+
+    document.addEventListener("DOMContentLoaded", function () {
+        window.requestAnimationFrame(initScrollReveals);
+    });
+})();
+
+(function () {
     var offerings = window.kirafanOriginalCharacters || [];
     var storageKey = "kirafan-offering-count";
     var closeTimer;
     var preparedOffering = null;
+    var activeSmokeCleanup = null;
 
     function readOfferingCount() {
         try {
@@ -730,7 +984,7 @@ var vm = new Vue({
         };
     }
 
-    // 点击上香时，在龛位内升起一小片星光
+    // 点击后先完成点燃与烟雾扩散，再揭示预加载好的角色。
     function playOfferingEffect(shrine) {
         if (!shrine) {
             return;
@@ -742,7 +996,7 @@ var vm = new Vue({
         shrine.classList.add("is-offering");
         window.setTimeout(function () {
             shrine.classList.remove("is-offering");
-        }, 900);
+        }, 1400);
 
         var layer = shrine.querySelector(".spark-layer");
         if (!layer) {
@@ -756,17 +1010,207 @@ var vm = new Vue({
         wave.className = "offering-wave";
         layer.appendChild(wave);
 
-        for (var i = 0; i < 16; i++) {
+        for (var i = 0; i < 20; i++) {
             var spark = document.createElement("span");
             var isPetal = i % 5 === 0;
-            spark.className = isPetal ? "spark spark-petal" : "spark";
-            spark.textContent = isPetal ? "◆" : (i % 3 === 0 ? "✦" : "✧");
+            var isEmber = i % 4 === 1;
+            spark.className = isPetal ? "spark spark-petal" : (isEmber ? "spark spark-ember" : "spark");
+            spark.textContent = isPetal ? "◆" : (isEmber ? "•" : (i % 3 === 0 ? "✦" : "✧"));
             spark.style.left = (10 + Math.random() * 80) + "%";
             spark.style.bottom = (10 + Math.random() * 24) + "%";
             spark.style.fontSize = (7 + Math.random() * 9).toFixed(1) + "px";
             spark.style.animationDelay = (Math.random() * 260).toFixed(0) + "ms";
             spark.style.animationDuration = (1200 + Math.random() * 700).toFixed(0) + "ms";
+            spark.style.setProperty("--spark-drift", (-48 + Math.random() * 96).toFixed(0) + "px");
+            spark.style.setProperty("--spark-turn", (-220 + Math.random() * 440).toFixed(0) + "deg");
             layer.appendChild(spark);
+        }
+
+        if (activeSmokeCleanup) {
+            activeSmokeCleanup();
+        }
+
+        var oldSmokeLayer = document.querySelector(".offering-smoke-burst");
+        if (oldSmokeLayer) {
+            oldSmokeLayer.remove();
+        }
+
+        var incense = shrine.querySelector(".incense-stick");
+        if (incense) {
+            var smokeLayer = document.createElement("div");
+            var smokePositionFrame = 0;
+            var smokePointerFrame = 0;
+            var smokeSettleTimer = 0;
+            var smokeRemovalTimer = 0;
+            var smokeResizeObserver = null;
+            var visualViewport = window.visualViewport;
+            var pointerFlow = 0;
+            var targetPointerFlow = 0;
+            var smokeOriginX = null;
+            var smokeOriginY = null;
+            var lastPointerFlowTime = 0;
+            var lastPointerX = null;
+            var reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+            smokeLayer.className = "offering-smoke-burst";
+            smokeLayer.setAttribute("aria-hidden", "true");
+
+            function positionSmokeLayer() {
+                window.cancelAnimationFrame(smokePositionFrame);
+                smokePositionFrame = window.requestAnimationFrame(function () {
+                    smokePositionFrame = 0;
+                    if (!smokeLayer.isConnected || !incense.isConnected) {
+                        return;
+                    }
+
+                    var incenseRect = incense.getBoundingClientRect();
+                    var scrollLeft = window.pageXOffset || document.documentElement.scrollLeft || 0;
+                    var scrollTop = window.pageYOffset || document.documentElement.scrollTop || 0;
+                    smokeOriginX = incenseRect.left + incenseRect.width / 2;
+                    smokeOriginY = incenseRect.top;
+                    smokeLayer.style.left = (smokeOriginX + scrollLeft).toFixed(1) + "px";
+                    smokeLayer.style.top = (incenseRect.top + scrollTop).toFixed(1) + "px";
+                });
+            }
+
+            function handleSmokeLayoutChange() {
+                positionSmokeLayer();
+                window.clearTimeout(smokeSettleTimer);
+                smokeSettleTimer = window.setTimeout(positionSmokeLayer, 120);
+            }
+
+            function renderPointerFlow(timestamp) {
+                var frameScale = lastPointerFlowTime ? Math.min(2, (timestamp - lastPointerFlowTime) / 16.667) : 1;
+                var followRate = 1 - Math.pow(0.86, frameScale);
+                lastPointerFlowTime = timestamp;
+                pointerFlow += (targetPointerFlow - pointerFlow) * followRate;
+                targetPointerFlow *= Math.pow(0.94, frameScale);
+                smokeLayer.style.setProperty("--smoke-flow-angle", (pointerFlow * 0.2).toFixed(2) + "deg");
+
+                if (Math.abs(pointerFlow) < 0.05 && Math.abs(targetPointerFlow) < 0.05) {
+                    smokePointerFrame = 0;
+                    lastPointerFlowTime = 0;
+                    return;
+                }
+                smokePointerFrame = window.requestAnimationFrame(renderPointerFlow);
+            }
+
+            function handlePointerMove(event) {
+                if (smokeOriginX === null || smokeOriginY === null) {
+                    return;
+                }
+
+                var smokeTop = smokeOriginY - 420;
+                var nearestSmokeY = Math.max(smokeTop, Math.min(smokeOriginY, event.clientY));
+                var distanceX = event.clientX - smokeOriginX;
+                var distanceY = event.clientY - nearestSmokeY;
+                var distance = Math.sqrt(distanceX * distanceX + distanceY * distanceY);
+                var influence = Math.max(0, 1 - distance / 260);
+                var pointerVelocityX = lastPointerX === null ? 0 : event.clientX - lastPointerX;
+                lastPointerX = event.clientX;
+                targetPointerFlow = Math.max(-16, Math.min(16, (-distanceX * 0.042 + pointerVelocityX * 0.3) * influence));
+
+                if (!smokePointerFrame) {
+                    smokePointerFrame = window.requestAnimationFrame(renderPointerFlow);
+                }
+            }
+
+            function removeSmokeLayer() {
+                window.clearTimeout(smokeRemovalTimer);
+                window.clearTimeout(smokeSettleTimer);
+                window.cancelAnimationFrame(smokePositionFrame);
+                window.cancelAnimationFrame(smokePointerFrame);
+                window.removeEventListener("resize", handleSmokeLayoutChange);
+                window.removeEventListener("scroll", positionSmokeLayer);
+                window.removeEventListener("pointermove", handlePointerMove);
+                if (visualViewport) {
+                    visualViewport.removeEventListener("resize", handleSmokeLayoutChange);
+                }
+                if (smokeResizeObserver) {
+                    smokeResizeObserver.disconnect();
+                }
+                smokeLayer.remove();
+                if (activeSmokeCleanup === removeSmokeLayer) {
+                    activeSmokeCleanup = null;
+                }
+            }
+
+            // 单一路径从香头出发，直接改变曲线形态，避免高开销的逐帧湍流滤镜。
+            var svgNamespace = "http://www.w3.org/2000/svg";
+            function createSvgElement(name, attributes) {
+                var element = document.createElementNS(svgNamespace, name);
+                Object.keys(attributes || {}).forEach(function (attribute) {
+                    element.setAttribute(attribute, attributes[attribute]);
+                });
+                return element;
+            }
+
+            var smokeSvg = createSvgElement("svg", {
+                "class": "offering-smoke-line",
+                "viewBox": "-110 -430 220 430",
+                "preserveAspectRatio": "xMidYMax meet"
+            });
+            var smokeDefs = createSvgElement("defs");
+            var smokeGradient = createSvgElement("linearGradient", {
+                "id": "offeringSmokeGradient",
+                "gradientUnits": "userSpaceOnUse",
+                "x1": "0",
+                "y1": "0",
+                "x2": "0",
+                "y2": "-420"
+            });
+            [
+                ["0%", "#59625e", "0.72"],
+                ["18%", "#68716d", "0.6"],
+                ["52%", "#858d89", "0.34"],
+                ["82%", "#abb1ae", "0.16"],
+                ["100%", "#c5c9c7", "0"]
+            ].forEach(function (stopInfo) {
+                smokeGradient.appendChild(createSvgElement("stop", {
+                    "offset": stopInfo[0],
+                    "stop-color": stopInfo[1],
+                    "stop-opacity": stopInfo[2]
+                }));
+            });
+            smokeDefs.appendChild(smokeGradient);
+            smokeSvg.appendChild(smokeDefs);
+
+            var smokeGroup = createSvgElement("g", {
+                "class": "offering-smoke-line-group"
+            });
+            var smokeShapeA = "M 0 0 C -14 -30 42 -48 18 -82 C -12 -116 -58 -132 -28 -171 C 12 -207 64 -224 34 -262 C -2 -300 -62 -318 -22 -355 C 14 -385 50 -402 22 -420";
+            var smokeShapeB = "M 0 0 C 14 -30 -38 -50 -14 -84 C 12 -118 56 -136 24 -173 C -14 -211 -64 -226 -28 -265 C 4 -303 62 -320 22 -357 C -14 -388 -48 -405 -16 -420";
+            var smokeShapeC = "M 0 0 C -6 -32 28 -52 8 -85 C -18 -120 -44 -138 -14 -176 C 22 -213 48 -232 18 -269 C -16 -307 -46 -322 -4 -361 C 22 -391 34 -409 10 -420";
+            var smokePath = createSvgElement("path", {
+                "class": "offering-smoke-path",
+                "d": smokeShapeA,
+                "pathLength": "420"
+            });
+            smokePath.appendChild(createSvgElement("animate", {
+                "attributeName": "d",
+                "values": [smokeShapeA, smokeShapeB, smokeShapeC, smokeShapeA].join(";"),
+                "keyTimes": "0;0.36;0.7;1",
+                "keySplines": "0.42 0 0.58 1;0.42 0 0.58 1;0.42 0 0.58 1",
+                "calcMode": "spline",
+                "dur": reducedMotion ? "18s" : "9.6s",
+                "repeatCount": "indefinite"
+            }));
+            smokeGroup.appendChild(smokePath);
+            smokeSvg.appendChild(smokeGroup);
+            smokeLayer.appendChild(smokeSvg);
+            document.body.appendChild(smokeLayer);
+            window.addEventListener("resize", handleSmokeLayoutChange);
+            window.addEventListener("scroll", positionSmokeLayer, { passive: true });
+            if (visualViewport) {
+                visualViewport.addEventListener("resize", handleSmokeLayoutChange);
+            }
+            window.addEventListener("pointermove", handlePointerMove, { passive: true });
+            if ("ResizeObserver" in window) {
+                smokeResizeObserver = new ResizeObserver(handleSmokeLayoutChange);
+                smokeResizeObserver.observe(shrine);
+            }
+            activeSmokeCleanup = removeSmokeLayer;
+            positionSmokeLayer();
+            smokeRemovalTimer = window.setTimeout(removeSmokeLayer, 3 * 60 * 1000);
         }
 
         window.setTimeout(function () {
@@ -832,7 +1276,11 @@ var vm = new Vue({
             renderCount();
             playOfferingEffect(shrine);
 
-            currentOffering.ready.then(function () {
+            var ceremonyReady = new Promise(function (resolve) {
+                window.setTimeout(resolve, 760);
+            });
+
+            Promise.all([currentOffering.ready, ceremonyReady]).then(function () {
                 characterJapanese.textContent = offering.japanese;
                 characterRomaji.textContent = offering.romaji;
                 characterChinese.textContent = offering.chinese || "";

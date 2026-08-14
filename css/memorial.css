@@ -81,6 +81,10 @@
         grid-template-columns: 360px minmax(0, 1fr);
         gap: 24px;
     }
+
+    #action-and-counter-holder {
+        min-height: 416px;
+    }
 }
 
 #timer-and-action > #columns-holder {
@@ -102,16 +106,17 @@
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     min-height: 286px;
-    padding: 28px 18px 20px;
+    padding: 28px 18px;
     border: 1px solid rgba(216, 204, 209, 0.9);
     border-radius: 10px;
     /* 半透明叠加，露出角色立绘 */
     background-color: rgba(255, 253, 250, 0.48);
     background-image: url("../imgs/Kirara_part2_Star5_StandPic_0.png");
     background-repeat: no-repeat;
-    background-position: right -22px bottom -28px;
-    background-size: auto 116%;
+    background-position: calc(50% + 72px) calc(100% - 4px);
+    background-size: auto 94%;
     background-blend-mode: normal;
     -webkit-backdrop-filter: blur(13px) saturate(120%);
     backdrop-filter: blur(13px) saturate(120%);
@@ -133,22 +138,25 @@
 }
 
 .incense-scene {
+    --incense-offset-x: -86px;
     position: relative;
     z-index: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 5px;
+    gap: 7px;
     width: 100%;
+    padding-top: 50px;
+    transform: translateY(22px);
 }
 
 .incense-scene::before {
     content: "";
     position: absolute;
-    left: 50%;
-    top: 54px;
-    width: 150px;
-    height: 84px;
+    left: calc(50% + var(--incense-offset-x));
+    top: 114px;
+    width: 174px;
+    height: 98px;
     border: 1px solid rgba(240, 181, 65, 0.3);
     border-radius: 50%;
     background: radial-gradient(ellipse, rgba(255, 220, 136, 0.2), transparent 66%);
@@ -193,6 +201,8 @@
 /* ---------- 香与烟的特效 ---------- */
 .incense-stick {
     position: relative;
+    top: 14px;
+    left: var(--incense-offset-x);
     width: 5px;
     height: 68px;
     border-radius: 3px 3px 1px 1px;
@@ -202,13 +212,16 @@
 
 .incense-burner {
     position: relative;
+    top: 14px;
+    left: var(--incense-offset-x);
     z-index: 1;
-    width: 86px;
-    height: 35px;
-    margin-top: -4px;
-    border-radius: 8px 8px 28px 28px;
-    background: linear-gradient(180deg, #c98454 0%, #9e503d 58%, #74352f 100%);
-    box-shadow: inset 0 2px 4px rgba(255,255,255,0.26), 0 8px 13px rgba(87,45,41,0.18);
+    width: 104px;
+    height: 49px;
+    margin-top: -6px;
+    border: 2px solid #713d36;
+    border-radius: 11px 11px 36px 36px;
+    background: linear-gradient(180deg, #e7a06f 0%, #bd684f 52%, #7d3f39 100%);
+    box-shadow: inset 0 3px 4px rgba(255,255,255,0.3), 0 9px 15px rgba(87,45,41,0.2);
     animation: burner-float 4s ease-in-out infinite;
 }
 
@@ -219,17 +232,32 @@
 
 .burner-rim {
     position: absolute;
-    left: -5px;
-    right: -5px;
-    top: -4px;
-    height: 9px;
+    left: -7px;
+    right: -7px;
+    top: -7px;
+    z-index: 3;
+    height: 15px;
+    border: 2px solid #713d36;
     border-radius: 50%;
     background: linear-gradient(180deg, #e2a16a, #843d35);
 }
 
+.burner-ash {
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    top: -3px;
+    z-index: 4;
+    height: 9px;
+    border-radius: 50%;
+    background: radial-gradient(ellipse, #d7c3b6 0 38%, #806963 72%, #4f3a38 100%);
+    box-shadow: inset 0 2px 2px rgba(255, 255, 255, 0.42);
+}
+
 .burner-mark {
     position: absolute;
-    inset: 7px 0 auto;
+    inset: 13px 0 auto;
+    z-index: 2;
     color: rgba(255, 224, 157, 0.84);
     font-size: 0.82rem;
     text-align: center;
@@ -253,56 +281,6 @@
 @keyframes ember-glow {
     0%, 100% { opacity: 0.82; transform: translateX(-50%) scale(0.9); }
     50%      { opacity: 1;    transform: translateX(-50%) scale(1.15); }
-}
-
-.smoke {
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    width: 34px;
-    height: 96px;
-    transform: translateX(-50%);
-    pointer-events: none;
-    animation: smoke-drift 5s ease-in-out infinite alternate;
-}
-
-@keyframes smoke-drift {
-    from { margin-left: -5px; }
-    to { margin-left: 5px; }
-}
-
-.smoke span {
-    position: absolute;
-    bottom: 0;
-    left: 50%;
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(190, 190, 190, 0.55) 0%, rgba(190, 190, 190, 0) 70%);
-    opacity: 0;
-    animation: smoke-rise 6s linear infinite;
-}
-
-.smoke span:nth-child(1) { animation-delay: 0s; }
-.smoke span:nth-child(2) { animation-delay: 2s; }
-.smoke span:nth-child(3) { animation-delay: 4s; }
-
-@keyframes smoke-rise {
-    0% {
-        opacity: 0;
-        transform: translate(-50%, 0) scale(0.4);
-    }
-    12% {
-        opacity: 0.75;
-    }
-    50% {
-        transform: translate(-140%, -48px) scale(1.5);
-        opacity: 0.42;
-    }
-    100% {
-        opacity: 0;
-        transform: translate(30%, -94px) scale(2.4);
-    }
 }
 
 /* 点击上香时，从按钮升起的星光 */
@@ -330,9 +308,58 @@
     filter: drop-shadow(0 0 4px rgba(232, 141, 175, 0.55));
 }
 
+.spark-ember {
+    color: #e96f35;
+    text-shadow: 0 0 7px rgba(255, 136, 63, 0.88);
+}
+
+/* 点击后以页面坐标跟随香头生成，避免被龛位和舞台的裁切边界截断。 */
+.offering-smoke-burst {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 30;
+    overflow: visible;
+    width: 1px;
+    height: 1px;
+    pointer-events: none;
+}
+
+.offering-smoke-line {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 220px;
+    height: 430px;
+    overflow: visible;
+    transform: translate3d(-50%, 0, 0) rotate(var(--smoke-flow-angle, 0deg));
+    transform-origin: center bottom;
+    backface-visibility: hidden;
+    will-change: transform;
+}
+
+.offering-smoke-line-group {
+    transform-box: fill-box;
+    transform-origin: center bottom;
+    animation: smoke-line-sway 8.4s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;
+    will-change: transform;
+}
+
+.offering-smoke-path {
+    fill: none;
+    stroke: url("#offeringSmokeGradient");
+    stroke-width: 4.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: 0.86;
+    vector-effect: non-scaling-stroke;
+    animation: smoke-line-breathe 6.8s ease-in-out infinite;
+    will-change: opacity;
+}
+
 .offering-wave {
     position: absolute;
-    left: 50%;
+    left: calc(50% - 86px);
     bottom: 34%;
     width: 84px;
     height: 30px;
@@ -362,17 +389,41 @@
     }
 }
 
+@keyframes smoke-line-sway {
+    0% { transform: rotate(-5.5deg) skewX(-3deg) scaleX(0.9); }
+    18% { transform: rotate(2.8deg) skewX(1.8deg) scaleX(1.05); }
+    42% { transform: rotate(-3.8deg) skewX(-2.2deg) scaleX(0.94); }
+    65% { transform: rotate(4.2deg) skewX(2.6deg) scaleX(1.08); }
+    82% { transform: rotate(-1.8deg) skewX(-1.2deg) scaleX(0.98); }
+    100% { transform: rotate(5.5deg) skewX(3deg) scaleX(1.1); }
+}
+
+@keyframes smoke-line-breathe {
+    0%, 100% { opacity: 0.68; }
+    48% { opacity: 0.92; }
+}
+
 #action-and-counter-holder.is-offering .incense-burner {
-    animation: burner-pulse 900ms ease-out;
+    animation: burner-pulse 1200ms cubic-bezier(0.2, 0.7, 0.26, 1);
 }
 
 #action-and-counter-holder.is-offering .offering-button {
     animation: offering-button-pulse 700ms ease-out;
 }
 
+#action-and-counter-holder.is-offering .incense-stick {
+    animation: incense-settle 1050ms cubic-bezier(0.2, 0.72, 0.24, 1);
+}
+
+#action-and-counter-holder.is-offering .incense-stick::after {
+    animation: ember-flare 1300ms ease-out both;
+}
+
 @keyframes burner-pulse {
-    0%, 100% { transform: scale(1); }
-    38% { transform: scale(1.08); filter: brightness(1.18); }
+    0%, 100% { transform: translateY(0) scale(1); filter: brightness(1); }
+    18% { transform: translateY(2px) scale(0.98); }
+    48% { transform: translateY(-4px) scale(1.07); filter: brightness(1.2); }
+    72% { transform: translateY(1px) scale(0.995); }
 }
 
 @keyframes offering-button-pulse {
@@ -380,8 +431,39 @@
     42% { transform: translateY(-2px) scale(1.045); }
 }
 
+@keyframes incense-settle {
+    0%, 100% { transform: rotate(0deg); }
+    22% { transform: rotate(-1.5deg); }
+    48% { transform: rotate(1.2deg); }
+    70% { transform: rotate(-0.5deg); }
+}
+
+@keyframes ember-flare {
+    0% {
+        opacity: 0.82;
+        transform: translateX(-50%) scale(0.9);
+        box-shadow: 0 0 10px 3px rgba(255, 150, 60, 0.65);
+    }
+    24% {
+        opacity: 1;
+        transform: translateX(-50%) scale(1.85);
+        box-shadow: 0 0 22px 8px rgba(255, 124, 48, 0.86);
+    }
+    62% {
+        transform: translateX(-50%) scale(1.08);
+        box-shadow: 0 0 14px 4px rgba(255, 163, 69, 0.72);
+    }
+    100% {
+        opacity: 0.9;
+        transform: translateX(-50%) scale(0.94);
+        box-shadow: 0 0 10px 3px rgba(255, 150, 60, 0.65);
+    }
+}
+
 /* ---------- 上香按钮与计数 ---------- */
 #action-and-counter-holder .memorial-action {
+    position: relative;
+    left: var(--incense-offset-x);
     min-height: auto;
     display: flex;
     flex-direction: column;
@@ -782,7 +864,34 @@
     to { opacity: 1; transform: scale(1); }
 }
 
-/* ---------- 移动端 ---------- */
+/* ---------- 响应式布局 ---------- */
+@media screen and (min-width: 992px) {
+    #action-and-counter-holder {
+        background-position: calc(50% + 102px) calc(100% - 4px);
+    }
+
+    .incense-scene {
+        --incense-offset-x: -56px;
+    }
+
+    .offering-wave {
+        left: calc(50% - 56px);
+    }
+}
+
+@media screen and (max-width: 991px) {
+    #action-and-counter-holder {
+        padding-bottom: 32px;
+    }
+}
+
+@media screen and (min-width: 600px) and (max-width: 991px) {
+    #action-and-counter-holder {
+        width: min(480px, 100%);
+        justify-self: center;
+    }
+}
+
 @media screen and (max-width: 767px) {
     .timezone-overlay {
         padding: 8px 12px;
@@ -802,9 +911,9 @@
     }
 
     #action-and-counter-holder {
-        padding: 18px 14px 16px;
-        background-position: right -24px bottom -32px;
-        background-size: auto 122%;
+        padding: 18px 14px 30px;
+        background-position: calc(50% + 72px) calc(100% - 4px);
+        background-size: auto 94%;
     }
 
     .offering-dialog img {
@@ -828,12 +937,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .smoke span,
     .incense-stick::after,
     .shrine-stars span,
     .incense-scene::before,
     .incense-burner,
-    .smoke,
+    #action-and-counter-holder.is-offering .incense-stick,
     #action-and-counter-holder.is-offering .incense-burner,
     #action-and-counter-holder.is-offering .offering-button,
     .offering-modal.is-revealing .offering-dialog img,
@@ -845,4 +953,10 @@
         animation-duration: 1ms !important;
         animation-iteration-count: 1 !important;
     }
+
+    .offering-smoke-line-group,
+    .offering-smoke-path {
+        animation-duration: 10s !important;
+    }
+
 }
