@@ -4,6 +4,7 @@
     var data = window.kirafanGachaData;
     var assetRoot = "https://asset.kirafan.cn/texture/charauiresource/";
     var recordKey = "kirafan-memorial-gacha-record-v1";
+    var soundKey = "kirafan-memorial-gacha-sound-v1";
     var pageSize = 24;
 
     var classes = [
@@ -25,7 +26,14 @@
     var state = {
         catalogPage: 1,
         record: readRecord(),
-        pools: { 3: [], 4: [], 5: [] }
+        pools: { 3: [], 4: [], 5: [] },
+        soundEnabled: readSoundPreference(),
+        finishSummonAnimation: null,
+        viewer: {
+            card: null,
+            evolved: false,
+            mode: "card"
+        }
     };
 
     function byId(id) {
@@ -62,6 +70,31 @@
         }
     }
 
+    function readSoundPreference() {
+        try {
+            return window.localStorage.getItem(soundKey) !== "off";
+        } catch (error) {
+            return true;
+        }
+    }
+
+    function writeSoundPreference() {
+        try {
+            window.localStorage.setItem(soundKey, state.soundEnabled ? "on" : "off");
+        } catch (error) {
+            return;
+        }
+    }
+
+    function updateSoundButton() {
+        var button = byId("soundToggle");
+        button.classList.toggle("is-muted", !state.soundEnabled);
+        button.setAttribute("aria-pressed", String(state.soundEnabled));
+        button.setAttribute("aria-label", state.soundEnabled ? "关闭召唤演出音" : "开启召唤演出音");
+        button.title = state.soundEnabled ? "关闭召唤演出音" : "开启召唤演出音";
+        button.textContent = "♪";
+    }
+
     function randomUnit() {
         if (window.crypto && window.crypto.getRandomValues) {
             var values = new Uint32Array(1);
@@ -89,12 +122,23 @@
         return 3;
     }
 
-    function cardArtUrl(card) {
-        return assetRoot + "characard/characard_" + card.id + ".jpg";
+    function displayedCardId(card, evolved) {
+        return evolved && card.evolvedId ? card.evolvedId : card.id;
     }
 
-    function cardIconUrl(card) {
-        return assetRoot + "charaicon/charaicon_" + card.id + ".jpg";
+    function cardArtUrl(card, evolved, highResolution) {
+        return assetRoot + "characard/characard_" + displayedCardId(card, evolved) + (highResolution ? ".png" : ".jpg");
+    }
+
+    function cardIconUrl(card, evolved) {
+        return assetRoot + "charaicon/charaicon_" + displayedCardId(card, evolved) + ".png";
+    }
+
+    function cardIllustrationUrl(card, evolved) {
+        var id = displayedCardId(card, evolved);
+        var hasFull = evolved ? card.evolvedHasFullIllustration : card.hasFullIllustration;
+        var directory = hasFull ? "charaillustfull/charaillust_full_" : "charaillustchara/charaillust_chara_";
+        return assetRoot + directory + id + ".png";
     }
 
     function cardDetailUrl(card) {
@@ -113,24 +157,149 @@
         return card.titleZh || card.title;
     }
 
-    function appendCardImage(container, card, useFullArt) {
+    function cardImageSources(card, options) {
+        if (options.kind === "illustration") {
+            return [
+                cardIllustrationUrl(card, options.evolved),
+                cardArtUrl(card, options.evolved, true),
+                cardIconUrl(card, options.evolved)
+            ];
+        }
+        if (options.highResolution) {
+            return [
+                cardArtUrl(card, options.evolved, true),
+                cardArtUrl(card, options.evolved, false),
+                cardIconUrl(card, options.evolved)
+            ];
+        }
+        return [
+            cardArtUrl(card, options.evolved, false),
+            cardIconUrl(card, options.evolved)
+        ];
+    }
+
+    function setCardImage(image, container, card, options) {
+        image.kirafanSources = cardImageSources(card, options);
+        image.kirafanSourceIndex = 0;
+        image.alt = displayName(card) + (options.kind === "illustration" ? "角色图" : options.evolved ? "进化后卡面" : "初始卡面");
+        image.loading = options.eager ? "eager" : "lazy";
+        image.fetchPriority = options.eager ? "high" : "auto";
+        container.classList.remove("is-icon", "is-image-unavailable", "is-illustration");
+        container.classList.toggle("is-illustration", options.kind === "illustration");
+        image.hidden = false;
+        image.src = image.kirafanSources[0];
+    }
+
+    function appendCardImage(container, card, options) {
         var image = document.createElement("img");
-        image.src = useFullArt ? cardArtUrl(card) : cardIconUrl(card);
-        image.alt = displayName(card) + "角色卡";
-        image.loading = useFullArt ? "eager" : "lazy";
         image.decoding = "async";
         image.addEventListener("error", function handleError() {
-            if (useFullArt && image.dataset.fallback !== "icon") {
-                image.dataset.fallback = "icon";
-                container.classList.add("is-icon");
-                image.src = cardIconUrl(card);
+            image.kirafanSourceIndex += 1;
+            if (image.kirafanSourceIndex < image.kirafanSources.length) {
+                if (image.kirafanSourceIndex === image.kirafanSources.length - 1) {
+                    container.classList.remove("is-illustration");
+                    container.classList.add("is-icon");
+                }
+                image.src = image.kirafanSources[image.kirafanSourceIndex];
                 return;
             }
-            image.removeEventListener("error", handleError);
-            image.remove();
-            container.classList.add("is-image-unavailable");
+            if (!container.classList.contains("is-image-unavailable")) {
+                container.classList.add("is-icon");
+                container.classList.add("is-image-unavailable");
+            }
+            image.hidden = true;
         });
         container.appendChild(image);
+        setCardImage(image, container, card, options);
+        return image;
+    }
+
+    function createEvolutionSwitch(card, onChange) {
+        if (!card.evolvedId) {
+            return null;
+        }
+
+        var group = document.createElement("div");
+        group.className = "evolution-switch";
+        group.setAttribute("role", "group");
+        group.setAttribute("aria-label", displayName(card) + " 卡面形态");
+
+        [
+            { label: "初始", evolved: false },
+            { label: "进化", evolved: true }
+        ].forEach(function (option) {
+            var button = document.createElement("button");
+            button.type = "button";
+            button.textContent = option.label;
+            button.classList.toggle("is-active", !option.evolved);
+            button.setAttribute("aria-pressed", String(!option.evolved));
+            button.addEventListener("click", function () {
+                Array.prototype.forEach.call(group.children, function (item) {
+                    var active = item === button;
+                    item.classList.toggle("is-active", active);
+                    item.setAttribute("aria-pressed", String(active));
+                });
+                onChange(option.evolved);
+            });
+            group.appendChild(button);
+        });
+        return group;
+    }
+
+    function updateViewer() {
+        var card = state.viewer.card;
+        if (!card) {
+            return;
+        }
+
+        var evolved = state.viewer.evolved && Boolean(card.evolvedId);
+        state.viewer.evolved = evolved;
+        byId("viewerTitle").textContent = displayName(card);
+        byId("viewerSubtitle").textContent = displayTitle(card);
+        byId("viewerRarity").textContent = starText(card.rarity);
+        byId("viewerForm").textContent = evolved ? "进化后" : "初始";
+        byId("viewerDetailLink").href = cardDetailUrl(card);
+
+        var media = byId("viewerMedia");
+        clearElement(media);
+        appendCardImage(media, card, {
+            evolved: evolved,
+            highResolution: true,
+            eager: true,
+            kind: state.viewer.mode
+        });
+
+        var evolutionControls = byId("viewerEvolution");
+        evolutionControls.hidden = !card.evolvedId;
+        [byId("viewerBase"), byId("viewerEvolved")].forEach(function (button) {
+            var active = button === byId(evolved ? "viewerEvolved" : "viewerBase");
+            button.classList.toggle("is-active", active);
+            button.setAttribute("aria-pressed", String(active));
+        });
+        [byId("viewerCardArt"), byId("viewerIllustration")].forEach(function (button) {
+            var active = button === byId(state.viewer.mode === "card" ? "viewerCardArt" : "viewerIllustration");
+            button.classList.toggle("is-active", active);
+            button.setAttribute("aria-pressed", String(active));
+        });
+    }
+
+    function openCardViewer(card, evolved) {
+        var dialog = byId("cardViewer");
+        state.viewer.card = card;
+        state.viewer.evolved = Boolean(evolved && card.evolvedId);
+        state.viewer.mode = "card";
+        updateViewer();
+        if (!dialog.open) {
+            dialog.showModal();
+        }
+        document.body.classList.add("viewer-open");
+    }
+
+    function closeCardViewer() {
+        var dialog = byId("cardViewer");
+        if (dialog.open) {
+            dialog.close();
+        }
     }
 
     function createDrawCard(card, index) {
@@ -138,10 +307,21 @@
         article.className = "draw-card";
         article.dataset.rarity = String(card.rarity);
         article.style.animationDelay = (index * 55) + "ms";
+        var evolved = false;
 
-        var media = document.createElement("div");
+        var media = document.createElement("button");
+        media.type = "button";
         media.className = "draw-card-media";
-        appendCardImage(media, card, true);
+        media.setAttribute("aria-label", "放大查看 " + displayName(card) + " 初始卡面");
+        var cardImage = appendCardImage(media, card, {
+            evolved: false,
+            highResolution: true,
+            eager: true,
+            kind: "card"
+        });
+        media.addEventListener("click", function () {
+            openCardViewer(card, evolved);
+        });
 
         var rarity = document.createElement("span");
         rarity.className = "draw-card-rarity";
@@ -186,16 +366,30 @@
         body.appendChild(title);
         body.appendChild(name);
         body.appendChild(tags);
-        article.appendChild(media);
-        article.appendChild(body);
+        var evolutionSwitch = createEvolutionSwitch(card, function (showEvolved) {
+            evolved = showEvolved;
+            setCardImage(cardImage, media, card, {
+                evolved: evolved,
+                highResolution: true,
+                eager: true,
+                kind: "card"
+            });
+            media.setAttribute("aria-label", "放大查看 " + displayName(card) + (evolved ? " 进化后卡面" : " 初始卡面"));
+        });
+        if (evolutionSwitch) {
+            body.appendChild(evolutionSwitch);
+        }
 
         var link = document.createElement("a");
-        link.className = "draw-card-link";
+        link.className = "draw-card-detail";
         link.href = cardDetailUrl(card);
         link.target = "_blank";
         link.rel = "noopener noreferrer";
+        link.textContent = "卡片资料 ↗";
         link.setAttribute("aria-label", "查看 " + displayName(card) + " 的卡片资料");
-        article.appendChild(link);
+        body.appendChild(link);
+        article.appendChild(media);
+        article.appendChild(body);
         return article;
     }
 
@@ -204,15 +398,22 @@
         article.className = "catalog-card";
         article.dataset.rarity = String(card.rarity);
 
-        var link = document.createElement("a");
-        link.href = cardDetailUrl(card);
-        link.target = "_blank";
-        link.rel = "noopener noreferrer";
-        link.setAttribute("aria-label", "查看 " + displayName(card) + " 的卡片资料");
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "catalog-card-open";
+        button.setAttribute("aria-label", "查看 " + displayName(card) + " 的高清卡面");
+        button.addEventListener("click", function () {
+            openCardViewer(card, false);
+        });
 
         var imageBox = document.createElement("div");
         imageBox.className = "catalog-card-image";
-        appendCardImage(imageBox, card, false);
+        appendCardImage(imageBox, card, {
+            evolved: false,
+            highResolution: false,
+            eager: false,
+            kind: "card"
+        });
 
         var name = document.createElement("strong");
         name.textContent = displayName(card);
@@ -230,11 +431,11 @@
         meta.appendChild(rarity);
         meta.appendChild(year);
 
-        link.appendChild(imageBox);
-        link.appendChild(name);
-        link.appendChild(title);
-        link.appendChild(meta);
-        article.appendChild(link);
+        button.appendChild(imageBox);
+        button.appendChild(name);
+        button.appendChild(title);
+        button.appendChild(meta);
+        article.appendChild(button);
         return article;
     }
 
@@ -262,18 +463,99 @@
         byId("drawTen").disabled = disabled;
     }
 
+    function playSummonSound(rarity) {
+        if (!state.soundEnabled) {
+            return;
+        }
+
+        var AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) {
+            return;
+        }
+
+        // The public archive has the Unity scene but no web-playable original audio.
+        var context;
+        try {
+            context = new AudioContext();
+            var start = context.currentTime + 0.03;
+            var notes = rarity === 5 ? [523.25, 659.25, 783.99, 1046.5] : rarity === 4 ? [440, 554.37, 659.25] : [392, 493.88, 587.33];
+            notes.forEach(function (frequency, index) {
+                var oscillator = context.createOscillator();
+                var gain = context.createGain();
+                var noteStart = start + index * 0.17;
+                oscillator.type = index === notes.length - 1 ? "sine" : "triangle";
+                oscillator.frequency.setValueAtTime(frequency, noteStart);
+                gain.gain.setValueAtTime(0.0001, noteStart);
+                gain.gain.exponentialRampToValueAtTime(0.085, noteStart + 0.025);
+                gain.gain.exponentialRampToValueAtTime(0.0001, noteStart + 0.72);
+                oscillator.connect(gain);
+                gain.connect(context.destination);
+                oscillator.start(noteStart);
+                oscillator.stop(noteStart + 0.75);
+            });
+            window.setTimeout(function () {
+                Promise.resolve(context.close()).catch(function () { return; });
+            }, 1800);
+        } catch (error) {
+            if (context && context.close) {
+                Promise.resolve(context.close()).catch(function () { return; });
+            }
+        }
+    }
+
+    function runSummonAnimation(cards, done) {
+        var stage = byId("summonStage");
+        var highestRarity = Math.max.apply(null, cards.map(function (card) { return card.rarity; }));
+        var reducedMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        var finished = false;
+        var timer;
+
+        stage.hidden = false;
+        stage.className = "summon-stage rarity-" + highestRarity;
+        stage.setAttribute("aria-hidden", "false");
+        byId("summonStageText").textContent = highestRarity === 5
+            ? "虹色的星光正在汇聚"
+            : highestRarity === 4
+                ? "金色的星光正在汇聚"
+                : "星光正在回应呼唤";
+        document.body.classList.add("summon-playing");
+        window.requestAnimationFrame(function () {
+            stage.classList.add("is-active");
+        });
+        playSummonSound(highestRarity);
+
+        function finish() {
+            if (finished) {
+                return;
+            }
+            finished = true;
+            window.clearTimeout(timer);
+            stage.classList.add("is-ending");
+            window.setTimeout(function () {
+                stage.hidden = true;
+                stage.setAttribute("aria-hidden", "true");
+                document.body.classList.remove("summon-playing");
+                state.finishSummonAnimation = null;
+                done();
+            }, reducedMotion ? 0 : 220);
+        }
+
+        state.finishSummonAnimation = finish;
+        timer = window.setTimeout(finish, reducedMotion ? 60 : 1900);
+    }
+
     function performSummon(count) {
         setSummonButtonsDisabled(true);
         byId("resultStatus").textContent = "正在翻开圣典……";
 
-        window.setTimeout(function () {
-            var results = [];
-            for (var index = 0; index < count; index++) {
-                var guaranteed = count === 10 && index === count - 1;
-                var rarity = chooseRarity(guaranteed);
-                results.push(pickRandom(state.pools[rarity]));
-            }
+        var results = [];
+        for (var index = 0; index < count; index++) {
+            var guaranteed = count === 10 && index === count - 1;
+            var rarity = chooseRarity(guaranteed);
+            results.push(pickRandom(state.pools[rarity]));
+        }
 
+        runSummonAnimation(results, function () {
             var ownedSet = new Set(state.record.owned);
             results.forEach(function (card) {
                 ownedSet.add(card.id);
@@ -289,7 +571,7 @@
             setSummonButtonsDisabled(false);
             byId("resultsTitle").focus({ preventScroll: true });
             byId("resultsTitle").scrollIntoView({ behavior: "smooth", block: "start" });
-        }, 360);
+        });
     }
 
     function normalizeSearch(value) {
@@ -421,11 +703,47 @@
         byId("characterCount").textContent = data.meta.characterCount;
         byId("titleCount").textContent = data.meta.titleCount;
         updateRecordDisplay();
+        updateSoundButton();
         populateTitleFilter();
         renderCatalog();
 
         byId("drawOne").addEventListener("click", function () { performSummon(1); });
         byId("drawTen").addEventListener("click", function () { performSummon(10); });
+        byId("soundToggle").addEventListener("click", function () {
+            state.soundEnabled = !state.soundEnabled;
+            writeSoundPreference();
+            updateSoundButton();
+        });
+        byId("skipSummon").addEventListener("click", function () {
+            if (state.finishSummonAnimation) {
+                state.finishSummonAnimation();
+            }
+        });
+        byId("viewerClose").addEventListener("click", closeCardViewer);
+        byId("cardViewer").addEventListener("click", function (event) {
+            if (event.target === byId("cardViewer")) {
+                closeCardViewer();
+            }
+        });
+        byId("cardViewer").addEventListener("close", function () {
+            document.body.classList.remove("viewer-open");
+        });
+        byId("viewerBase").addEventListener("click", function () {
+            state.viewer.evolved = false;
+            updateViewer();
+        });
+        byId("viewerEvolved").addEventListener("click", function () {
+            state.viewer.evolved = true;
+            updateViewer();
+        });
+        byId("viewerCardArt").addEventListener("click", function () {
+            state.viewer.mode = "card";
+            updateViewer();
+        });
+        byId("viewerIllustration").addEventListener("click", function () {
+            state.viewer.mode = "illustration";
+            updateViewer();
+        });
         byId("catalogFilters").addEventListener("submit", function (event) { event.preventDefault(); });
         ["searchInput", "titleFilter", "rarityFilter"].forEach(function (id) {
             var eventName = id === "searchInput" ? "input" : "change";

@@ -16,17 +16,24 @@ async function fetchJson(name) {
     return response.json();
 }
 
-const [characters, namedCharacters, titles, translations, version, translationVersion] = await Promise.all([
+const [characters, namedCharacters, titles, translations, assetBundles, version, translationVersion] = await Promise.all([
     fetchJson("CharacterList"),
     fetchJson("NamedList"),
     fetchJson("TitleList"),
     fetch(`${TRANSLATION_ROOT}/zh.json`).then((response) => response.json()),
+    fetch(`${DATABASE_ROOT}/../assetBundle.json`).then((response) => response.json()),
     fetch(`${DATABASE_ROOT}/../version`).then((response) => response.text()),
     fetch(`${TRANSLATION_ROOT}/version`).then((response) => response.text())
 ]);
 
 const namedById = new Map(namedCharacters.map((item) => [item.m_NamedType, item]));
 const titleById = new Map(titles.map((item) => [item.m_TitleType, item]));
+const characterById = new Map(characters.map((item) => [item.m_CharaID, item]));
+const assetNames = new Set(assetBundles.map((item) => item.name));
+
+function fullIllustrationName(id) {
+    return `texture/charauiresource/charaillustfull/charaillust_full_${id}.muast`;
+}
 
 const cards = characters
     .filter((card) => card.m_CharaID % 10 === 0)
@@ -37,6 +44,14 @@ const cards = characters
     .map((card) => {
         const named = namedById.get(card.m_NamedType);
         const title = titleById.get(named.m_TitleType);
+        const evolved = characterById.get(card.m_CharaID + 1);
+        const hasEvolution = Boolean(
+            evolved &&
+            evolved.m_NamedType === card.m_NamedType &&
+            evolved.m_Rare === card.m_Rare &&
+            evolved.m_Class === card.m_Class &&
+            evolved.m_Element === card.m_Element
+        );
         if (!title) {
             throw new Error(`Missing title ${named.m_TitleType} for card ${card.m_CharaID}`);
         }
@@ -51,6 +66,9 @@ const cards = characters
             titleId: named.m_TitleType,
             namedType: card.m_NamedType,
             rarity: card.m_Rare + 1,
+            evolvedId: hasEvolution ? evolved.m_CharaID : null,
+            hasFullIllustration: assetNames.has(fullIllustrationName(card.m_CharaID)),
+            evolvedHasFullIllustration: hasEvolution && assetNames.has(fullIllustrationName(evolved.m_CharaID)),
             class: card.m_Class,
             element: card.m_Element,
             limited: Boolean(card.isPeriodLimited),
@@ -63,6 +81,7 @@ const cards = characters
 const cardIds = new Set(cards.map((card) => card.id));
 const characterIds = new Set(cards.map((card) => card.namedType));
 const includedTitleIds = new Set(cards.map((card) => card.titleId));
+const evolutionCount = cards.filter((card) => card.evolvedId !== null).length;
 
 if (cardIds.size !== cards.length) {
     throw new Error("Duplicate card IDs found in generated gacha data");
@@ -87,11 +106,13 @@ const payload = {
         cardCount: cards.length,
         characterCount: characterIds.size,
         titleCount: includedTitles.length,
+        evolutionCount,
         excludedTitleType: ORIGINAL_TITLE_TYPE,
         sources: [
             "https://database.kirafan.cn/database/CharacterList.json",
             "https://database.kirafan.cn/database/NamedList.json",
             "https://database.kirafan.cn/database/TitleList.json",
+            "https://database.kirafan.cn/assetBundle.json",
             "https://trans.kirafan.cn/zh.json"
         ]
     },

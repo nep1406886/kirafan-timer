@@ -6,7 +6,9 @@
     <meta name="description" content="琪拉拉幻想曲非原创角色纪念召唤，收录全部可用角色卡。">
     <title>纪念召唤 · 琪拉拉幻想曲</title>
     <link rel="preconnect" href="https://asset.kirafan.cn" crossorigin>
-    <link rel="stylesheet" href="css/gacha.css?v=20260814-1">
+    <link rel="preconnect" href="https://bucket-f-asset.kirafan.cn" crossorigin>
+    <link rel="preconnect" href="https://bucket-b-asset.kirafan.cn" crossorigin>
+    <link rel="stylesheet" href="css/gacha.css?v=20260814-2">
     <link rel="icon" href="favicon.png">
 </head>
 <body class="gacha-page">
@@ -15,8 +17,23 @@
             <span aria-hidden="true">←</span>
             返回纪念页
         </a>
-        <span class="topbar-title">KIRARA FANTASIA · MEMORIAL CALL</span>
+        <div class="topbar-tools">
+            <span class="topbar-title">KIRARA FANTASIA · MEMORIAL CALL</span>
+            <button id="soundToggle" class="sound-toggle" type="button" aria-pressed="true" aria-label="关闭召唤演出音" title="关闭召唤演出音">♪</button>
+        </div>
     </header>
+
+    <div id="summonStage" class="summon-stage" aria-hidden="true" hidden>
+        <button id="skipSummon" class="skip-summon" type="button">跳过</button>
+        <div class="summon-stage-core" aria-hidden="true">
+            <img class="archive-kirakira archive-kirakira-a" src="https://bucket-f-asset.kirafan.cn/uiatlas/gachaplayuiatlas/GachKirakira.png" alt="">
+            <img class="archive-kirakira archive-kirakira-b" src="https://bucket-f-asset.kirafan.cn/uiatlas/gachaplayuiatlas/GachKirakira.png" alt="">
+            <div class="summon-magic-ring"><span></span></div>
+            <div class="summon-light-core">✦</div>
+            <img class="archive-decoration-star" src="https://bucket-b-asset.kirafan.cn/uiatlas/gachauiatlas/DecorationStar.png" alt="">
+        </div>
+        <p id="summonStageText" class="summon-stage-text" aria-live="polite"></p>
+    </div>
 
     <main>
         <section class="gacha-hero" aria-labelledby="gachaTitle">
@@ -121,6 +138,38 @@
         </section>
     </main>
 
+    <dialog id="cardViewer" class="card-viewer" aria-labelledby="viewerTitle">
+        <div class="viewer-shell">
+            <button id="viewerClose" class="viewer-close" type="button" aria-label="关闭卡面查看器">×</button>
+            <div class="viewer-layout">
+                <div id="viewerMedia" class="viewer-media"></div>
+                <div class="viewer-copy">
+                    <p id="viewerSubtitle" class="viewer-subtitle"></p>
+                    <h2 id="viewerTitle"></h2>
+                    <div class="viewer-card-meta">
+                        <span id="viewerRarity"></span>
+                        <span id="viewerForm"></span>
+                    </div>
+                    <div class="viewer-control-block">
+                        <span>显示内容</span>
+                        <div class="viewer-segmented" role="group" aria-label="显示内容">
+                            <button id="viewerCardArt" type="button" aria-pressed="true">卡面</button>
+                            <button id="viewerIllustration" type="button" aria-pressed="false">角色图</button>
+                        </div>
+                    </div>
+                    <div id="viewerEvolution" class="viewer-control-block" hidden>
+                        <span>卡片形态</span>
+                        <div class="viewer-segmented" role="group" aria-label="卡片形态">
+                            <button id="viewerBase" type="button" aria-pressed="true">初始</button>
+                            <button id="viewerEvolved" type="button" aria-pressed="false">进化</button>
+                        </div>
+                    </div>
+                    <a id="viewerDetailLink" class="viewer-detail-link" href="#" target="_blank" rel="noopener noreferrer">查看完整卡片资料 ↗</a>
+                </div>
+            </div>
+        </div>
+    </dialog>
+
     <footer class="gacha-footer">
         <p>非官方、非商业纪念页面。游戏角色、卡面及相关素材版权归原作者与相关权利方所有。</p>
         <nav aria-label="数据与素材来源">
@@ -130,7 +179,7 @@
         </nav>
     </footer>
 
-    <script src="asset/gacha/cards.js?v=20260814-1"></script>
-    <script src="gacha.js?v=20260814-1"></script>
+    <script src="asset/gacha/cards.js?v=20260814-2"></script>
+    <script src="gacha.js?v=20260814-2"></script>
 </body>
 </html>
