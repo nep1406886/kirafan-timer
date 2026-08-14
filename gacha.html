@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="琪拉拉幻想曲非原创角色纪念召唤，收录全部可用角色卡。">
+    <title>纪念召唤 · 琪拉拉幻想曲</title>
+    <link rel="preconnect" href="https://asset.kirafan.cn" crossorigin>
+    <link rel="stylesheet" href="css/gacha.css?v=20260814-1">
+    <link rel="icon" href="favicon.png">
+</head>
+<body class="gacha-page">
+    <header class="gacha-topbar">
+        <a class="back-link" href="index.html" aria-label="返回纪念计时器">
+            <span aria-hidden="true">←</span>
+            返回纪念页
+        </a>
+        <span class="topbar-title">KIRARA FANTASIA · MEMORIAL CALL</span>
+    </header>
+
+    <main>
+        <section class="gacha-hero" aria-labelledby="gachaTitle">
+            <div class="hero-copy">
+                <p class="eyebrow">召唤之馆 / 纪念复刻</p>
+                <h1 id="gachaTitle">与闪耀的她们<br>再次相遇</h1>
+                <p class="hero-lead">收录游戏内全部非原创可用角色卡。数据已静态保存，召唤完全在浏览器中进行。</p>
+                <dl class="pool-summary" aria-label="卡池概要">
+                    <div><dt id="cardCount">634</dt><dd>张角色卡</dd></div>
+                    <div><dt id="characterCount">225</dt><dd>名角色</dd></div>
+                    <div><dt id="titleCount">37</dt><dd>部作品</dd></div>
+                </dl>
+                <p class="exclusion-note"><span aria-hidden="true">✓</span> 已排除《琪拉拉幻想曲》原创角色</p>
+            </div>
+
+            <div class="summon-console" aria-labelledby="summonTitle">
+                <div class="summon-emblem" aria-hidden="true">
+                    <span class="emblem-star">✦</span>
+                    <span class="emblem-ring"></span>
+                </div>
+                <div class="summon-copy">
+                    <p class="console-kicker">CALL SYSTEM</p>
+                    <h2 id="summonTitle">开始召唤</h2>
+                    <p>十连召唤的最后一张必定为 ★4 或以上。</p>
+                </div>
+                <div class="summon-actions">
+                    <button id="drawOne" class="summon-button summon-button-secondary" type="button">
+                        <span>单次召唤</span>
+                        <small>CALL × 1</small>
+                    </button>
+                    <button id="drawTen" class="summon-button summon-button-primary" type="button">
+                        <span>十连召唤</span>
+                        <small>CALL × 10 · ★4+</small>
+                    </button>
+                </div>
+                <div class="rate-row" aria-label="召唤概率">
+                    <span><b>★5</b> 2%</span>
+                    <span><b>★4</b> 12%</span>
+                    <span><b>★3</b> 86%</span>
+                </div>
+                <dl class="summon-record" aria-label="本地召唤记录">
+                    <div><dt id="totalDraws">0</dt><dd>累计召唤</dd></div>
+                    <div><dt id="fiveStarDraws">0</dt><dd>★5 相遇</dd></div>
+                    <div><dt id="ownedCards">0</dt><dd>已遇卡片</dd></div>
+                </dl>
+            </div>
+        </section>
+
+        <section class="results-section" aria-labelledby="resultsTitle">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">SUMMON RESULT</p>
+                    <h2 id="resultsTitle" tabindex="-1">召唤结果</h2>
+                </div>
+                <p id="resultStatus" class="result-status" aria-live="polite">圣典正在等待你的呼唤。</p>
+            </div>
+            <div id="resultsGrid" class="results-grid results-grid-empty">
+                <div class="empty-result">
+                    <span aria-hidden="true">✧</span>
+                    <p>选择单次或十连召唤，角色卡会在这里显现。</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="catalog-section" aria-labelledby="catalogTitle">
+            <div class="section-heading catalog-heading">
+                <div>
+                    <p class="eyebrow">COMPLETE ARCHIVE</p>
+                    <h2 id="catalogTitle">完整卡池</h2>
+                </div>
+                <p>可以检索全部 634 张非原创角色卡，不需要先抽到。</p>
+            </div>
+
+            <form id="catalogFilters" class="catalog-filters" role="search">
+                <label class="filter-search">
+                    <span>搜索角色或作品</span>
+                    <input id="searchInput" type="search" placeholder="例如：由乃、向阳素描" autocomplete="off">
+                </label>
+                <label>
+                    <span>作品</span>
+                    <select id="titleFilter">
+                        <option value="">全部作品</option>
+                    </select>
+                </label>
+                <label>
+                    <span>稀有度</span>
+                    <select id="rarityFilter">
+                        <option value="">全部稀有度</option>
+                        <option value="5">★5</option>
+                        <option value="4">★4</option>
+                        <option value="3">★3</option>
+                    </select>
+                </label>
+            </form>
+
+            <div class="catalog-meta">
+                <p id="poolCount" aria-live="polite"></p>
+                <p>卡图按需从 KiraFan Assets 素材 CDN 加载。</p>
+            </div>
+            <div id="catalogGrid" class="catalog-grid"></div>
+            <nav id="catalogPagination" class="catalog-pagination" aria-label="完整卡池分页"></nav>
+        </section>
+    </main>
+
+    <footer class="gacha-footer">
+        <p>非官方、非商业纪念页面。游戏角色、卡面及相关素材版权归原作者与相关权利方所有。</p>
+        <nav aria-label="数据与素材来源">
+            <a href="https://kirarafantasia.miraheze.org/wiki/List_of_Creamates" target="_blank" rel="noopener noreferrer">角色目录 Wiki</a>
+            <a href="https://kirafan.cn/#/characters" target="_blank" rel="noopener noreferrer">KiraFan 解析 Wiki</a>
+            <a href="https://asset.kirafan.moe/#/" target="_blank" rel="noopener noreferrer">KiraFan Assets</a>
+        </nav>
+    </footer>
+
+    <script src="asset/gacha/cards.js?v=20260814-1"></script>
+    <script src="gacha.js?v=20260814-1"></script>
+</body>
+</html>

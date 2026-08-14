@@ -907,6 +907,69 @@ main {
     text-align: center;
 }
 
+.gacha-entry {
+    width: min(520px, 100%);
+    min-height: 76px;
+    margin: 0 auto 22px;
+    padding: 13px 18px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    border: 1px solid #75646f;
+    border-radius: 5px;
+    background: #2c252a;
+    color: #f5eef2;
+    text-align: left;
+    text-decoration: none;
+    transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
+}
+
+.gacha-entry:hover,
+.gacha-entry:focus-visible {
+    border-color: #f0b541;
+    background: #352b31;
+    color: #fff;
+    text-decoration: none;
+    transform: translateY(-2px);
+    outline: none;
+}
+
+.gacha-entry-mark {
+    width: 42px;
+    height: 42px;
+    flex: 0 0 42px;
+    display: grid;
+    place-items: center;
+    border: 1px solid #f0b541;
+    border-radius: 50%;
+    color: #f7d783;
+    font-size: 1.3rem;
+}
+
+.gacha-entry-copy {
+    min-width: 0;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+}
+
+.gacha-entry-copy small {
+    color: #a99ca4;
+    font-size: 0.62rem;
+    letter-spacing: 0.1em;
+}
+
+.gacha-entry-copy strong {
+    margin-top: 1px;
+    font-family: "Noto Serif SC", "STSong", serif;
+    font-size: 1.02rem;
+}
+
+.gacha-entry-arrow {
+    color: #f7d783;
+    font-size: 1.25rem;
+}
+
 .memorial-action {
     min-height: 69px;
     display: flex;

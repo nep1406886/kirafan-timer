@@ -362,22 +362,6 @@
     }
 }
 
-/* 上香瞬间的柔光脉冲 */
-#action-and-counter-holder.is-offering::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: radial-gradient(circle at 50% 62%, rgba(255, 205, 120, 0.42) 0%, rgba(255, 205, 120, 0) 62%);
-    animation: offer-pulse 900ms ease-out forwards;
-    pointer-events: none;
-}
-
-@keyframes offer-pulse {
-    0%   { opacity: 0; }
-    28%  { opacity: 1; }
-    100% { opacity: 0; }
-}
-
 #action-and-counter-holder.is-offering .incense-burner {
     animation: burner-pulse 900ms ease-out;
 }
@@ -434,6 +418,11 @@
 
 #action-and-counter-holder .offering-button:active {
     transform: translateY(1px);
+}
+
+#action-and-counter-holder .offering-button:disabled {
+    cursor: wait;
+    opacity: 0.72;
 }
 
 #action-and-counter-holder .offering-count {

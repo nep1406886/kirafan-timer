@@ -662,7 +662,7 @@ var vm = new Vue({
     var offerings = window.kirafanOriginalCharacters || [];
     var storageKey = "kirafan-offering-count";
     var closeTimer;
-    var lastOfferingIndex = -1;
+    var preparedOffering = null;
 
     function readOfferingCount() {
         try {
@@ -678,6 +678,56 @@ var vm = new Vue({
         } catch (error) {
             return;
         }
+    }
+
+    function pickOfferingIndex() {
+        return Math.floor(Math.random() * offerings.length);
+    }
+
+    // 只提前准备下一位角色，避免一次性加载全部立绘占用大量流量。
+    function preloadOffering(offering) {
+        var preloadedImage = new Image();
+        preloadedImage.decoding = "async";
+        if ("fetchPriority" in preloadedImage) {
+            preloadedImage.fetchPriority = "high";
+        }
+
+        return new Promise(function (resolve) {
+            var settled = false;
+
+            function finish() {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+
+                if (typeof preloadedImage.decode === "function") {
+                    preloadedImage.decode().catch(function () {
+                        return;
+                    }).then(function () {
+                        resolve(preloadedImage);
+                    });
+                    return;
+                }
+                resolve(preloadedImage);
+            }
+
+            preloadedImage.addEventListener("load", finish, { once: true });
+            preloadedImage.addEventListener("error", finish, { once: true });
+            preloadedImage.src = offering.image;
+            if (preloadedImage.complete) {
+                finish();
+            }
+        });
+    }
+
+    function prepareNextOffering() {
+        var offeringIndex = pickOfferingIndex();
+        var offering = offerings[offeringIndex];
+        preparedOffering = {
+            character: offering,
+            ready: preloadOffering(offering)
+        };
     }
 
     // 点击上香时，在龛位内升起一小片星光
@@ -762,36 +812,57 @@ var vm = new Vue({
         }
 
         button.addEventListener("click", function () {
-            var offeringIndex = Math.floor(Math.random() * offerings.length);
-            if (offerings.length > 1 && offeringIndex === lastOfferingIndex) {
-                offeringIndex = (offeringIndex + 1 + Math.floor(Math.random() * (offerings.length - 1))) % offerings.length;
+            if (button.disabled) {
+                return;
             }
-            lastOfferingIndex = offeringIndex;
-            var offering = offerings[offeringIndex];
+
+            var currentOffering = preparedOffering;
+            if (!currentOffering) {
+                prepareNextOffering();
+                currentOffering = preparedOffering;
+            }
+            preparedOffering = null;
+            prepareNextOffering();
+
+            var offering = currentOffering.character;
+            button.disabled = true;
+            button.setAttribute("aria-busy", "true");
             count += 1;
             writeOfferingCount(count);
             renderCount();
             playOfferingEffect(shrine);
-            modal.classList.remove("is-revealing");
-            void modal.offsetWidth;
-            characterJapanese.textContent = offering.japanese;
-            characterRomaji.textContent = offering.romaji;
-            characterChinese.textContent = offering.chinese || "";
-            characterChinese.hidden = !offering.chinese;
-            characterWiki.href = offering.wikiUrl;
-            characterGroup.textContent = offering.group + " · 原创角色";
-            characterCv.textContent = offering.cv || "未公开";
-            characterArtist.textContent = offering.artist || "未公开";
-            characterSeries.textContent = offering.series || "きららファンタジア";
-            messageName.textContent = offering.japanese;
-            image.alt = offering.japanese + (offering.chinese ? " / " + offering.chinese : "");
-            image.src = offering.image;
-            modal.hidden = false;
-            window.requestAnimationFrame(function () {
-                modal.classList.add("is-visible");
-                modal.classList.add("is-revealing");
+
+            currentOffering.ready.then(function () {
+                characterJapanese.textContent = offering.japanese;
+                characterRomaji.textContent = offering.romaji;
+                characterChinese.textContent = offering.chinese || "";
+                characterChinese.hidden = !offering.chinese;
+                characterWiki.href = offering.wikiUrl;
+                characterGroup.textContent = offering.group + " · 原创角色";
+                characterCv.textContent = offering.cv || "未公开";
+                characterArtist.textContent = offering.artist || "未公开";
+                characterSeries.textContent = offering.series || "きららファンタジア";
+                messageName.textContent = offering.japanese;
+                image.alt = offering.japanese + (offering.chinese ? " / " + offering.chinese : "");
+                image.src = offering.image;
+
+                var imageReady = typeof image.decode === "function"
+                    ? image.decode().catch(function () { return; })
+                    : Promise.resolve();
+
+                return imageReady;
+            }).then(function () {
+                modal.classList.remove("is-revealing");
+                void modal.offsetWidth;
+                modal.hidden = false;
+                window.requestAnimationFrame(function () {
+                    modal.classList.add("is-visible");
+                    modal.classList.add("is-revealing");
+                });
+                button.disabled = false;
+                button.removeAttribute("aria-busy");
+                closeTimer = window.setTimeout(closeOffering, 8000);
             });
-            closeTimer = window.setTimeout(closeOffering, 8000);
         });
 
         modal.querySelectorAll("[data-close-offering]").forEach(function (element) {
@@ -806,6 +877,7 @@ var vm = new Vue({
             }
         });
         renderCount();
+        prepareNextOffering();
     }
 
     function markCounterUnavailable() {
