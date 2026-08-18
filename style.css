@@ -263,6 +263,26 @@ main {
     transform: scale(1.035);
 }
 
+/* Archive artwork keeps its original aspect ratio and never crops the source image. */
+.memory-grid-archive .memory-card a {
+    display: grid;
+    place-items: center;
+    background: #fff;
+}
+
+.memory-grid-archive .memory-card img {
+    width: 100%;
+    height: auto;
+    max-height: none;
+    object-fit: contain;
+    transform: none;
+}
+
+.memory-grid-archive .memory-card a:hover img,
+.memory-grid-archive .memory-card a:focus-visible img {
+    transform: none;
+}
+
 .memory-card-body {
     padding: 11px 12px 13px;
 }
