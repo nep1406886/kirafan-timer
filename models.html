@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="闪耀幻想曲 KiraFan Assets 模型与纹理浏览器。">
+    <title>模型素材库 · 闪耀幻想曲</title>
+    <link rel="preconnect" href="https://database.kirafan.cn" crossorigin>
+    <link rel="preconnect" href="https://asset.kirafan.cn" crossorigin>
+    <link rel="preconnect" href="https://bucket-a-asset.kirafan.cn" crossorigin>
+    <link rel="stylesheet" href="css/models.css?v=20260818-1">
+    <link rel="icon" href="favicon.png">
+</head>
+
+<body class="models-page">
+    <header class="models-topbar">
+        <a class="models-back" href="index.html" aria-label="返回纪念页">
+            <span aria-hidden="true">←</span>
+            返回纪念页
+        </a>
+        <div class="models-brand">
+            <img src="imgs/official-site/kirarafantasia-logo.svg" alt="きららファンタジア">
+            <span>ASSET MODEL ARCHIVE</span>
+        </div>
+        <a class="models-source" href="https://asset.kirafan.moe/" target="_blank" rel="noopener noreferrer">
+            打开素材库 <span aria-hidden="true">↗</span>
+        </a>
+    </header>
+
+    <main>
+        <section class="models-hero" aria-labelledby="modelsTitle">
+            <div class="models-hero-copy">
+                <p class="models-eyebrow">KIRARA FANTASIA / UNITY ASSETBUNDLE</p>
+                <h1 id="modelsTitle">模型素材观察室</h1>
+                <p>浏览公开素材库中的角色、敌人与武器；已验证条目可直接播放游戏骨骼模型与原始动作。</p>
+                <div class="models-hero-note">
+                    <span class="models-hero-dot" aria-hidden="true"></span>
+                    <span>纹理与模型均按需加载，浏览器只缓存实际打开的条目。</span>
+                </div>
+            </div>
+            <div class="models-hero-art" aria-hidden="true">
+                <img src="imgs/official-site/hero/hero-05-pc.png" alt="">
+            </div>
+        </section>
+
+        <section class="models-workbench" aria-label="模型素材浏览器">
+            <div class="models-toolbar">
+                <label class="models-search">
+                    <span>搜索模型名称</span>
+                    <input id="modelSearch" type="search" placeholder="例如：model_pl_140106、model_en" autocomplete="off">
+                </label>
+                <div class="models-filters" role="group" aria-label="模型分类">
+                    <button class="models-filter is-active" type="button" data-kind="all">全部 <span data-count="all">—</span></button>
+                    <button class="models-filter" type="button" data-kind="ready">可预览 <span data-count="ready">—</span></button>
+                    <button class="models-filter" type="button" data-kind="player">玩家 <span data-count="player">—</span></button>
+                    <button class="models-filter" type="button" data-kind="enemy">敌人 <span data-count="enemy">—</span></button>
+                    <button class="models-filter" type="button" data-kind="weapon">武器 <span data-count="weapon">—</span></button>
+                </div>
+            </div>
+
+            <div class="models-status" id="modelsStatus" role="status" aria-live="polite">
+                正在连接 KiraFan Assets 素材索引……
+            </div>
+
+            <div class="models-browser">
+                <aside class="models-list-panel" aria-label="模型列表">
+                    <div class="models-list-heading">
+                        <div>
+                            <span class="models-eyebrow">MODEL INDEX</span>
+                            <h2>素材条目</h2>
+                        </div>
+                        <span id="modelsResultCount" class="models-result-count">—</span>
+                    </div>
+                    <div id="modelList" class="models-list" role="listbox" aria-label="模型条目"></div>
+                    <nav id="modelsPagination" class="models-pagination" aria-label="模型列表分页"></nav>
+                </aside>
+
+                <section id="modelDetail" class="model-detail" aria-labelledby="modelDetailTitle">
+                    <div class="model-empty-state">
+                        <span class="model-empty-mark" aria-hidden="true">✦</span>
+                        <h2 id="modelDetailTitle">选择一个模型开始观察</h2>
+                        <p>列表会读取 Sprite 目录；已发布的 WebGL 条目还会显示完整模型与游戏动作。</p>
+                    </div>
+                </section>
+            </div>
+        </section>
+
+        <section class="models-about" aria-labelledby="modelsAboutTitle">
+            <div>
+                <span class="models-eyebrow">ABOUT THE FORMAT</span>
+                <h2 id="modelsAboutTitle">这里展示的是什么？</h2>
+            </div>
+            <p>素材库中的模型以 Unity AssetBundle（<code>.muast</code>）保存，浏览器无法直接交给 Three.js 渲染。本项目在发布前将已验证条目转换为保留 Mesh、Skin、骨骼与 AnimationClip 的 GLB；页面按需下载并缓存，未发布条目仍可查看官方提取的透明纹理和原始包。素材版权归原权利方所有。</p>
+        </section>
+    </main>
+
+    <footer class="models-footer">
+        <span>闪耀幻想曲纪念项目</span>
+        <a href="gacha.html">前往纪念召唤</a>
+        <a href="https://database.kirafan.cn/assetBundle.json" target="_blank" rel="noopener noreferrer">查看素材索引</a>
+    </footer>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script src="models.js?v=20260818-5"></script>
+</body>
+
+</html>

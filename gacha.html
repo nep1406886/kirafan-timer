@@ -14,7 +14,7 @@
     <link rel="preload" href="audio/gacha/claire-five-star.mp3" as="audio" type="audio/mpeg">
     <link rel="preload" href="audio/gacha/bgm-gacha.mp3" as="audio" type="audio/mpeg">
     <link rel="preload" href="audio/gacha/bgm-summon.mp3" as="audio" type="audio/mpeg">
-    <link rel="stylesheet" href="css/gacha.css?v=20260814-6">
+    <link rel="stylesheet" href="css/gacha.css?v=20260818-3">
     <link rel="icon" href="favicon.png">
 </head>
 <body class="gacha-page">
@@ -41,11 +41,18 @@
                 <img class="summon-magic-texture" src="imgs/gacha/gacha_magic_circle_lv2_web.png" alt="">
                 <span class="sigil-orbit sigil-orbit-outer"></span>
                 <span class="sigil-orbit sigil-orbit-inner"></span>
-                <span class="sigil-star"></span>
-                <span class="sigil-core">✦</span>
+                <span class="summon-center-stack">
+                    <span class="summon-official-mask summon-center-common"></span>
+                    <span class="summon-official-mask summon-center-base"></span>
+                    <span class="summon-official-mask summon-center-blur"></span>
+                    <span class="summon-official-mask summon-center-pattern"></span>
+                    <span class="summon-official-mask summon-center-class"></span>
+                    <span class="summon-official-mask summon-center-class-glow"></span>
+                </span>
             </div>
         </div>
         <div class="summon-key-sequence" aria-hidden="true">
+            <canvas id="summonKeyCanvas" class="summon-key-canvas"></canvas>
             <img class="summon-key" src="imgs/gacha/gacha_key_original.png" alt="">
             <span class="summon-key-flash"></span>
         </div>
@@ -289,6 +296,6 @@
     </footer>
 
     <script src="asset/gacha/cards.js?v=20260814-3"></script>
-    <script src="gacha.js?v=20260814-9"></script>
+    <script src="gacha.js?v=20260818-1"></script>
 </body>
 </html>

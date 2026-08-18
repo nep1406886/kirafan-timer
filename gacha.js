@@ -18,6 +18,13 @@
         3: "gacha/ui/ClassIconKnight.png",
         4: "gacha/ui/ClassIconAlchemist.png"
     };
+    var titleVoiceCueByTitleId = {
+        0: "006", 1: "007", 2: "003", 3: "000", 4: "004", 5: "001", 6: "005", 7: "002",
+        8: "008", 9: "009", 10: "010", 11: "011", 12: "015", 13: "012", 14: "014", 15: "013",
+        16: "016", 17: "017", 18: "018", 19: "019", 20: "028", 21: "029", 23: "031", 24: "030",
+        25: "033", 26: "034", 27: "036", 28: "035", 29: "037", 30: "039", 31: "038", 32: "040",
+        33: "041", 34: "051", 35: "053", 36: "052", 37: "054"
+    };
     var elementIconFiles = {
         0: "gacha/ui/ElementIconFire.png",
         1: "gacha/ui/ElementIconWater.png",
@@ -51,6 +58,7 @@
         resultVoice: null,
         resultVoiceTimer: null,
         summonBgm: null,
+        keyRendererPromise: null,
         summonInProgress: false,
         lastDrawCount: 0,
         viewer: {
@@ -70,6 +78,31 @@
         while (element.firstChild) {
             element.removeChild(element.firstChild);
         }
+    }
+
+    function loadGachaKeyRenderer() {
+        if (!state.keyRendererPromise) {
+            state.keyRendererPromise = import("./gacha-key-3d.js?v=20260818-1").then(function (module) {
+                return module.initGachaKeyRenderer();
+            }).catch(function () {
+                return null;
+            });
+        }
+        return state.keyRendererPromise;
+    }
+
+    function updateGachaKeyPhase(phaseNames) {
+        if (!state.keyRendererPromise) {
+            return;
+        }
+        var keyPhase = ["phase-key-lock", "phase-key-focus", "phase-key-flight"].find(function (name) {
+            return phaseNames.indexOf(name) !== -1;
+        }) || "";
+        state.keyRendererPromise.then(function (renderer) {
+            if (renderer) {
+                renderer.setPhase(keyPhase);
+            }
+        });
     }
 
     function readRecord() {
@@ -160,6 +193,21 @@
 
     function pickRandom(items) {
         return items[Math.floor(randomUnit() * items.length)];
+    }
+
+    function localDebugSummonOptions() {
+        if (window.location.hostname !== "127.0.0.1" && window.location.hostname !== "localhost") {
+            return null;
+        }
+        var parameters = new URLSearchParams(window.location.search);
+        var rarity = Number(parameters.get("debugRarity"));
+        var classType = Number(parameters.get("debugClass"));
+        var fiveStarCount = Number(parameters.get("debugFive"));
+        return {
+            rarity: [3, 4, 5].indexOf(rarity) !== -1 ? rarity : null,
+            classType: [0, 1, 2, 3, 4].indexOf(classType) !== -1 ? classType : null,
+            fiveStarCount: Number.isFinite(fiveStarCount) ? Math.max(0, Math.floor(fiveStarCount)) : 0
+        };
     }
 
     function chooseRarity(guaranteedFourStar) {
@@ -650,7 +698,7 @@
             : "召唤完成。与 " + cards.length + " 张角色卡相遇。";
         byId("resultVoiceLine").lang = "ja";
         byId("resultVoiceLine").textContent = fiveStarCount > 0
-            ? "す、す、すごかったです！ 次回もがんばりますっ！"
+            ? "す、すごかったです！ 次回もがんばりますっ！"
             : "次回もがんばりますっ！ またいつでも来てくださいね！";
         byId("duplicateCardCount").textContent = String(cards.length - newCount);
         byId("newCardCount").textContent = String(newCount);
@@ -723,7 +771,8 @@
     }
 
     function playSummonBgm() {
-        playSummonAudio("summonBgm", summonAudioFiles.summonBgm, 0.38, false);
+        // 原版召唤流程中，克蕾尔台词和卡面演出共用同一段循环 BGM。
+        playSummonAudio("summonBgm", summonAudioFiles.summonBgm, 0.38, true);
     }
 
     function playGachaBgm() {
@@ -735,8 +784,43 @@
     }
 
     function playTitleVoice(card) {
-        var titleId = String(card.titleId).padStart(3, "0");
-        playSummonAudio("titleVoice", summonAudioFiles.titleVoicePrefix + titleId + ".mp3", 0.94, false);
+        var cue = titleVoiceCueByTitleId[card.titleId];
+        if (!cue) {
+            return Promise.resolve(false);
+        }
+        return playSummonAudio("titleVoice", summonAudioFiles.titleVoicePrefix + cue + ".mp3", 0.94, false).then(function (started) {
+            var audio = state.titleVoice;
+            if (!started || !audio) {
+                return false;
+            }
+            return new Promise(function (resolve) {
+                var settled = false;
+                var timer = window.setTimeout(function () { finish(true); }, 12000);
+
+                function finish(completed) {
+                    if (settled) {
+                        return;
+                    }
+                    settled = true;
+                    window.clearTimeout(timer);
+                    audio.removeEventListener("ended", onEnded);
+                    audio.removeEventListener("pause", onPause);
+                    audio.removeEventListener("error", onError);
+                    resolve(completed);
+                }
+
+                function onEnded() { finish(true); }
+                function onPause() { finish(false); }
+                function onError() { finish(false); }
+
+                audio.addEventListener("ended", onEnded);
+                audio.addEventListener("pause", onPause);
+                audio.addEventListener("error", onError);
+                if (audio.ended) {
+                    finish(true);
+                }
+            });
+        });
     }
 
     function roomGreetingForHour(hour) {
@@ -768,11 +852,14 @@
         var newResults = results.filter(function (result) {
             return result.isNew && result.card.rarity !== 5;
         });
-        var protectedFiveIndex = results.findIndex(function (result) {
-            return result.isNew && result.card.rarity === 5;
-        });
+        var protectedFiveIndexes = results.reduce(function (indexes, result, index) {
+            if (result.isNew && result.card.rarity === 5) {
+                indexes.push(index);
+            }
+            return indexes;
+        }, []);
+        var protectedFiveShownIndexes = new Set();
         var protectedFivePlaying = false;
-        var protectedFiveShown = false;
         var skipRequested = false;
 
         stage.dataset.summonRun = runId;
@@ -792,6 +879,7 @@
         characterStand.hidden = true;
         byId("summonResultOverlay").hidden = true;
         document.body.classList.add("summon-playing");
+        loadGachaKeyRenderer();
         playSummonBgm();
 
         function isActive() {
@@ -799,7 +887,7 @@
         }
 
         function wait(delay) {
-            if (skipRequested && !protectedFivePlaying && !protectedFiveShown) {
+            if (skipRequested && !protectedFivePlaying && hasPendingProtectedFive()) {
                 return Promise.resolve(isActive());
             }
             return new Promise(function (resolve) {
@@ -842,8 +930,21 @@
             if (!isActive()) {
                 return false;
             }
-            stage.className = "summon-stage rarity-" + card.rarity + " is-active " + phaseNames;
+            stage.className = "summon-stage rarity-" + card.rarity + " class-" + card.class + " is-active " + phaseNames;
+            updateGachaKeyPhase(phaseNames);
             return true;
+        }
+
+        function hasPendingProtectedFive() {
+            return protectedFiveIndexes.some(function (index) {
+                return !protectedFiveShownIndexes.has(index);
+            });
+        }
+
+        function nextProtectedFiveIndex() {
+            return protectedFiveIndexes.find(function (index) {
+                return !protectedFiveShownIndexes.has(index);
+            });
         }
 
         function prepareSequenceImage(sources, alt, priority) {
@@ -898,19 +999,11 @@
         }
 
         function prepareCard(card, priority) {
-            var revealReady = prepareSequenceImage([
+            return prepareSequenceImage([
                 cardArtUrl(card, false, true),
                 cardArtUrl(card, false, false)
-            ], displayName(card) + "卡面", priority);
-            var featureReady = card.rarity === 5
-                ? prepareSequenceImage(hasFullIllustration(card, false)
-                    ? [cardFullIllustrationUrl(card, false), cardStandUrl(card, false), cardArtUrl(card, false, true)]
-                    : [cardStandUrl(card, false), cardArtUrl(card, false, true), cardArtUrl(card, false, false)],
-                displayName(card) + "五星插画", priority)
-                : Promise.resolve({ source: "", alt: "" });
-
-            return Promise.all([revealReady, featureReady]).then(function (prepared) {
-                return { reveal: prepared[0], feature: prepared[1] };
+            ], displayName(card) + "卡面", priority).then(function (reveal) {
+                return { reveal: reveal };
             });
         }
 
@@ -998,29 +1091,28 @@
             setStagePhase(cards[0], "phase-key-flight");
             byId("summonStageText").textContent = "";
             byId("summonVoiceLine").textContent = "";
-            if (!await wait(1650)) {
+            if (!await wait(1400)) {
                 return;
             }
             setStagePhase(cards[0], "phase-key-focus");
-            if (!await wait(1250)) {
+            if (!await wait(1900)) {
                 return;
             }
             setStagePhase(cards[0], "phase-key-lock");
-            if (!await wait(1250)) {
-                return;
-            }
-            setStagePhase(cards[0], "phase-key-lock phase-key-flash");
-            if (!await wait(720)) {
+            if (!await wait(1867)) {
                 return;
             }
 
             for (var index = 0; index < cards.length; index++) {
-                if (skipRequested && !protectedFiveShown && protectedFiveIndex >= 0 && index !== protectedFiveIndex) {
-                    index = protectedFiveIndex;
+                if (skipRequested && hasPendingProtectedFive()) {
+                    var nextProtectedIndex = nextProtectedFiveIndex();
+                    if (index !== nextProtectedIndex) {
+                        index = nextProtectedIndex;
+                    }
                 }
                 var card = cards[index];
                 var isFiveStar = card.rarity === 5;
-                protectedFivePlaying = index === protectedFiveIndex && !protectedFiveShown;
+                protectedFivePlaying = protectedFiveIndexes.indexOf(index) !== -1 && !protectedFiveShownIndexes.has(index);
                 if (preparedIndex !== index) {
                     preparedCard = prepareCard(card, "high");
                     preparedIndex = index;
@@ -1035,20 +1127,17 @@
                 if (!await wait(520)) {
                     return;
                 }
-                if (skipRequested && !protectedFivePlaying && !protectedFiveShown && protectedFiveIndex >= 0) {
-                    preparedIndex = protectedFiveIndex;
-                    preparedCard = prepareCard(cards[protectedFiveIndex], "high");
-                    index = protectedFiveIndex - 1;
+                if (skipRequested && !protectedFivePlaying && hasPendingProtectedFive()) {
+                    var nextProtectedAfterRoom = nextProtectedFiveIndex();
+                    preparedIndex = nextProtectedAfterRoom;
+                    preparedCard = prepareCard(cards[nextProtectedAfterRoom], "high");
+                    index = nextProtectedAfterRoom - 1;
                     continue;
                 }
 
                 var prepared = await preparedCard;
                 if (!isActive() || !commitSequenceImage(revealImage, prepared.reveal)) {
                     return;
-                }
-                if (isFiveStar) {
-                    commitSequenceImage(featureImage, prepared.feature);
-                    featureImage.hidden = true;
                 }
                 preparedCard = index + 1 < cards.length
                     ? prepareCard(cards[index + 1], "auto")
@@ -1059,20 +1148,22 @@
                 if (!await wait(1150)) {
                     return;
                 }
-                if (skipRequested && !protectedFivePlaying && !protectedFiveShown && protectedFiveIndex >= 0) {
-                    preparedIndex = protectedFiveIndex;
-                    preparedCard = prepareCard(cards[protectedFiveIndex], "high");
-                    index = protectedFiveIndex - 1;
+                if (skipRequested && !protectedFivePlaying && hasPendingProtectedFive()) {
+                    var nextProtectedAfterSigil = nextProtectedFiveIndex();
+                    preparedIndex = nextProtectedAfterSigil;
+                    preparedCard = prepareCard(cards[nextProtectedAfterSigil], "high");
+                    index = nextProtectedAfterSigil - 1;
                     continue;
                 }
                 setStagePhase(card, "phase-sigil phase-upgrade");
                 if (!await wait(isFiveStar ? 1150 : 900)) {
                     return;
                 }
-                if (skipRequested && !protectedFivePlaying && !protectedFiveShown && protectedFiveIndex >= 0) {
-                    preparedIndex = protectedFiveIndex;
-                    preparedCard = prepareCard(cards[protectedFiveIndex], "high");
-                    index = protectedFiveIndex - 1;
+                if (skipRequested && !protectedFivePlaying && hasPendingProtectedFive()) {
+                    var nextProtectedAfterUpgrade = nextProtectedFiveIndex();
+                    preparedIndex = nextProtectedAfterUpgrade;
+                    preparedCard = prepareCard(cards[nextProtectedAfterUpgrade], "high");
+                    index = nextProtectedAfterUpgrade - 1;
                     continue;
                 }
 
@@ -1080,18 +1171,25 @@
                     setStagePhase(card, "phase-sigil phase-upgrade phase-five-claire");
                     byId("summonStageText").textContent = "《" + displayTitle(card) + "》";
                     byId("summonVoiceLine").textContent = "クレア";
-                    playTitleVoice(card);
-                    if (!await wait(3000)) {
+                    var titleVoiceCompleted = await playTitleVoice(card);
+                    if (!isActive()) {
+                        return;
+                    }
+                    if (!titleVoiceCompleted && !await wait(3000)) {
+                        return;
+                    }
+                    if (titleVoiceCompleted && !await wait(280)) {
                         return;
                     }
 
-                    featureImage.hidden = true;
-                    setStagePhase(card, "phase-sigil phase-upgrade phase-five-feature");
-                    byId("summonStageText").textContent = "";
-                    byId("summonVoiceLine").textContent = "";
-                    if (!await wait(2600)) {
-                        return;
-                    }
+                }
+
+                featureImage.hidden = true;
+                setStagePhase(card, "phase-sigil phase-upgrade phase-class-feature");
+                byId("summonStageText").textContent = "";
+                byId("summonVoiceLine").textContent = "";
+                if (!await wait(isFiveStar ? 2400 : (card.rarity === 4 ? 1900 : 1500))) {
+                    return;
                 }
 
                 setStagePhase(card, "phase-reveal");
@@ -1110,11 +1208,11 @@
                         return;
                     }
                 }
-                if (index === protectedFiveIndex) {
-                    protectedFiveShown = true;
+                if (protectedFiveIndexes.indexOf(index) !== -1) {
+                    protectedFiveShownIndexes.add(index);
                     protectedFivePlaying = false;
                 }
-                if (skipRequested && protectedFiveShown) {
+                if (skipRequested && !hasPendingProtectedFive()) {
                     finish(true);
                     return;
                 }
@@ -1136,12 +1234,13 @@
             characterStand.hidden = true;
             stopSummonAudio();
             stage.className = "summon-stage is-active phase-result";
+            updateGachaKeyPhase("");
             state.finishSummonAnimation = null;
             done();
         }
 
         function requestSkip() {
-            if (protectedFiveIndex >= 0 && !protectedFiveShown) {
+            if (hasPendingProtectedFive()) {
                 skipRequested = true;
                 if (!protectedFivePlaying) {
                     releaseWaits();
@@ -1170,10 +1269,24 @@
         byId("resultStatus").textContent = "正在翻开圣典……";
 
         var results = [];
+        var debugOptions = localDebugSummonOptions();
         for (var index = 0; index < count; index++) {
             var guaranteed = count === 10 && index === count - 1;
-            var rarity = chooseRarity(guaranteed);
-            results.push(pickRandom(state.pools[rarity]));
+            var rarity = debugOptions && index < debugOptions.fiveStarCount
+                ? 5
+                : (debugOptions && debugOptions.rarity ? debugOptions.rarity : chooseRarity(guaranteed));
+            var debugPool = debugOptions && debugOptions.classType !== null
+                ? state.pools[rarity].filter(function (card) { return card.class === debugOptions.classType; })
+                : state.pools[rarity];
+            if (debugOptions) {
+                var unusedDebugCards = debugPool.filter(function (card) {
+                    return !results.some(function (result) { return result.id === card.id; });
+                });
+                if (unusedDebugCards.length) {
+                    debugPool = unusedDebugCards;
+                }
+            }
+            results.push(pickRandom(debugPool.length ? debugPool : state.pools[rarity]));
         }
 
         var previewOwnedSet = new Set(state.record.owned);
@@ -1205,7 +1318,7 @@
             updateRecordDisplay();
             renderResults(resultItems);
             playGachaBgm();
-            playResultVoice(false);
+            playResultVoice(results.some(function (card) { return card.rarity === 5; }));
             state.summonInProgress = false;
             setSummonButtonsDisabled(false);
             byId("resultsTitle").focus({ preventScroll: true });
