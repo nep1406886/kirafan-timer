@@ -2,25 +2,21 @@
     "use strict";
 
     var DATABASE_URL = "https://database.kirafan.cn/assetBundle.json";
-    var MODEL_MANIFEST_URL = "asset/models/manifest.json?v=20260818-3";
+    var MODEL_MANIFEST_URL = "asset/models/manifest.json?v=20260818-4";
     var ASSET_HOST = "https://asset.kirafan.cn/";
     var INDEX_PAGE_SIZE = 30;
     var MODEL_PATH = /^model\/(player|enemy|weapon|shadow)\//;
-    var MODEL_PREVIEWS = {
-        "model/player/model_pl_140106.muast": {
-            file: "asset/models/model_pl_140106/model.glb.gz?v=1787024189",
-            label: "完整蒙皮 · 5 个游戏动作 · 表情随动作并可细调",
-            animations: true,
-            expressions: true,
-            compression: "gzip"
-        }
-    };
+    var MODEL_PREVIEWS = {};
+    var PLAYER_MODEL_META = {};
+    var MODEL_TITLES = [];
+    var manifestState = { loaded: false, error: false };
     var activeModelCleanup = null;
     var state = {
         allModels: [],
         filteredModels: [],
         selected: null,
         kind: "all",
+        titleId: "all",
         query: "",
         page: 1,
         indexRequest: 0
@@ -28,6 +24,7 @@
 
     var elements = {
         search: document.getElementById("modelSearch"),
+        titleFilter: document.getElementById("modelTitleFilter"),
         status: document.getElementById("modelsStatus"),
         resultCount: document.getElementById("modelsResultCount"),
         list: document.getElementById("modelList"),
@@ -66,6 +63,67 @@
             kind: parts[1] || "other",
             file: parts[parts.length - 1] || name
         };
+    }
+
+    function buildPlayerMetadata() {
+        var data = window.kirafanGachaData;
+        if (!data || !Array.isArray(data.cards) || !Array.isArray(data.titles)) {
+            return;
+        }
+        MODEL_TITLES = data.titles.slice();
+        data.cards.forEach(function (card) {
+            [card.resourceId, card.evolvedResourceId].forEach(function (resourceId) {
+                if (!Number.isFinite(resourceId)) {
+                    return;
+                }
+                PLAYER_MODEL_META[String(resourceId).padStart(6, "0")] = {
+                    titleId: card.titleId,
+                    title: card.title,
+                    titleZh: card.titleZh,
+                    character: card.character,
+                    characterZh: card.characterZh
+                };
+            });
+        });
+    }
+
+    function modelMetadata(model) {
+        var match = /^model\/player\/model_pl_(\d+)\.muast$/.exec(model.name);
+        return match ? PLAYER_MODEL_META[match[1]] || null : null;
+    }
+
+    function bilingualLabel(chinese, japanese) {
+        if (!chinese || chinese === japanese) {
+            return japanese || chinese || "";
+        }
+        return chinese + " / " + japanese;
+    }
+
+    function populateTitleFilter() {
+        if (!elements.titleFilter) {
+            return;
+        }
+        var counts = {};
+        state.allModels.forEach(function (model) {
+            var metadata = modelMetadata(model);
+            if (metadata) {
+                counts[metadata.titleId] = (counts[metadata.titleId] || 0) + 1;
+            }
+        });
+        elements.titleFilter.innerHTML = "<option value='all'>全部作品</option>";
+        MODEL_TITLES.filter(function (title) {
+            return counts[title.id];
+        }).sort(function (left, right) {
+            return bilingualLabel(left.nameZh, left.name).localeCompare(
+                bilingualLabel(right.nameZh, right.name),
+                "zh-CN"
+            );
+        }).forEach(function (title) {
+            var option = document.createElement("option");
+            option.value = String(title.id);
+            option.textContent = bilingualLabel(title.nameZh, title.name) + "（" + counts[title.id] + "）";
+            elements.titleFilter.appendChild(option);
+        });
     }
 
     function bucketFor(model) {
@@ -124,22 +182,43 @@
         Object.keys(counts).forEach(function (key) {
             var countElement = document.querySelector("[data-count='" + key + "']");
             if (countElement) {
-                countElement.textContent = counts[key].toLocaleString("zh-CN");
+                countElement.textContent = key === "ready" && manifestState.error
+                    ? "加载失败"
+                    : counts[key].toLocaleString("zh-CN");
             }
         });
+        var readyButton = document.querySelector(".models-filter[data-kind='ready']");
+        if (readyButton) {
+            readyButton.disabled = manifestState.error;
+            readyButton.title = manifestState.error ? "WebGL 清单未能载入，请刷新或检查部署文件" : "只显示可直接预览的模型";
+        }
     }
 
     function applyFilter() {
         var query = state.query.trim().toLowerCase();
         state.filteredModels = state.allModels.filter(function (model) {
             var parts = pathParts(model.name);
+            var metadata = modelMetadata(model);
             if (state.kind === "ready" && !MODEL_PREVIEWS[model.name]) {
                 return false;
             }
             if (state.kind !== "all" && state.kind !== "ready" && parts.kind !== state.kind) {
                 return false;
             }
-            return !query || model.name.toLowerCase().indexOf(query) !== -1;
+            if (state.titleId !== "all" && (!metadata || String(metadata.titleId) !== state.titleId)) {
+                return false;
+            }
+            if (!query) {
+                return true;
+            }
+            var searchText = [
+                model.name,
+                metadata && metadata.title,
+                metadata && metadata.titleZh,
+                metadata && metadata.character,
+                metadata && metadata.characterZh
+            ].filter(Boolean).join(" ").toLowerCase();
+            return searchText.indexOf(query) !== -1;
         });
         state.page = Math.min(state.page, Math.max(1, Math.ceil(state.filteredModels.length / INDEX_PAGE_SIZE)));
         renderList();
@@ -148,7 +227,8 @@
     function renderList() {
         var start = (state.page - 1) * INDEX_PAGE_SIZE;
         var pageModels = state.filteredModels.slice(start, start + INDEX_PAGE_SIZE);
-        elements.resultCount.textContent = state.filteredModels.length.toLocaleString("zh-CN");
+        var pageCount = Math.max(1, Math.ceil(state.filteredModels.length / INDEX_PAGE_SIZE));
+        elements.resultCount.textContent = state.filteredModels.length.toLocaleString("zh-CN") + " 条 · " + pageCount + " 页";
         elements.list.innerHTML = "";
 
         if (pageModels.length === 0) {
@@ -156,14 +236,16 @@
         } else {
             pageModels.forEach(function (model) {
                 var parts = pathParts(model.name);
+                var metadata = modelMetadata(model);
                 var item = document.createElement("button");
                 item.type = "button";
                 item.className = "model-list-item" + (state.selected && state.selected.name === model.name ? " is-selected" : "");
                 item.setAttribute("role", "option");
                 item.setAttribute("aria-selected", state.selected && state.selected.name === model.name ? "true" : "false");
                 var previewLabel = MODEL_PREVIEWS[model.name] ? " · WEBGL" : "";
+                var workLabel = metadata ? bilingualLabel(metadata.titleZh, metadata.title) + " · " : "";
                 item.innerHTML = "<img class='model-list-icon' src='" + ASSET_HOST + encodeURI(model.name) + "?type=icon' alt='' loading='lazy'>" +
-                    "<span class='model-list-copy'><strong>" + escapeHtml(parts.file.replace(/\.muast$/i, "")) + "</strong><small>" + escapeHtml(parts.kind) + " · " + formatSize(model.size) + previewLabel + "</small></span><span class='model-list-arrow' aria-hidden='true'>›</span>";
+                    "<span class='model-list-copy'><strong>" + escapeHtml(parts.file.replace(/\.muast$/i, "")) + "</strong><small>" + escapeHtml(workLabel + parts.kind + " · " + formatSize(model.size) + previewLabel) + "</small></span><span class='model-list-arrow' aria-hidden='true'>›</span>";
                 item.addEventListener("click", function () { selectModel(model); });
                 elements.list.appendChild(item);
             });
@@ -191,7 +273,7 @@
         elements.pagination.appendChild(previous);
 
         var label = document.createElement("span");
-        label.textContent = state.page + " / " + pageCount;
+        label.textContent = "第 " + state.page + " / " + pageCount + " 页 · 共 " + state.filteredModels.length.toLocaleString("zh-CN") + " 条";
         elements.pagination.appendChild(label);
 
         var next = document.createElement("button");
@@ -207,17 +289,24 @@
         var parts = pathParts(model.name);
         var spriteCount = spriteNames.length;
         var preview = MODEL_PREVIEWS[model.name];
+        var metadata = modelMetadata(model);
         var actionMarkup = preview && preview.animations
             ? "<div class='model-action-strip' role='group' aria-label='游戏预设动作'><span>动作预设</span><button class='is-active' type='button' data-model-action='idle' data-clip='room_idle_L' aria-pressed='true' title='Common_body@room_idle_L'>待机<small>room_idle_L</small></button><button type='button' data-model-action='run' data-clip='battle_run' aria-pressed='false' title='Common_body@battle_run'>战斗跑动<small>battle_run</small></button><button type='button' data-model-action='damage' data-clip='damage' aria-pressed='false' title='Common_body@damage'>受击<small>damage</small></button><button type='button' data-model-action='jump' data-clip='kirarajump_0' aria-pressed='false' title='Common_body@kirarajump_0'>跳跃<small>kirarajump_0</small></button><button type='button' data-model-action='win' data-clip='win_st_0' aria-pressed='false' title='Common_body@win_st_0'>胜利<small>win_st_0</small></button></div>"
             : "";
         var faceMarkup = preview && preview.expressions
             ? "<div class='model-face-strip' role='group' aria-label='表情预设'><span>表情</span><button class='is-active' type='button' id='modelFaceAuto' aria-pressed='true'>跟随动作</button><button type='button' data-face-preset='normal' aria-pressed='false'>通常</button><button type='button' data-face-preset='smile' aria-pressed='false'>微笑</button><button type='button' data-face-preset='happy' aria-pressed='false'>开心</button><button type='button' data-face-preset='angry' aria-pressed='false'>生气</button><button type='button' data-face-preset='sad' aria-pressed='false'>难过</button><button type='button' data-face-preset='surprised' aria-pressed='false'>惊讶</button></div><details class='model-face-advanced' id='modelFaceAdvanced'><summary>展开全部表情组件</summary><div id='modelFaceControls' class='model-face-controls'></div></details>"
             : "";
+        var unavailableMarkup = manifestState.error
+            ? "<div class='model-conversion-note'><strong>WebGL 模型清单未能载入</strong><span>纹理索引正常；请刷新页面，或检查部署中是否包含 asset/models/manifest.json。</span></div>"
+            : "<div class='model-conversion-note'><strong>该条目的原始模型包当前不可用</strong><span>源素材索引仍保留条目，但转换时无法取得 Unity 包；透明纹理仍可正常查看。</span></div>";
         var previewMarkup = preview
             ? "<section class='model-3d-card' aria-label='游戏模型预览'><div class='model-3d-toolbar'><div><span class='model-live-badge'><i aria-hidden='true'></i>LIVE WEBGL</span><strong>游戏模型预览</strong><small>" + escapeHtml(preview.label) + "</small></div><div class='model-3d-actions'>" + (preview.animations ? "<button id='modelMotionToggle' type='button' aria-pressed='true'>暂停动作</button>" : "") + "<button id='modelViewReset' type='button'>重置视角</button></div></div>" + actionMarkup + faceMarkup + "<div id='model3dCanvas' class='model-3d-canvas'><div class='model-3d-loading'><span class='model-spinner' aria-hidden='true'></span><p>正在读取模型数据……</p></div></div><p class='model-3d-help'>拖动微调视角 · 滚轮缩放 · 2.5D 部件按游戏原始层级叠放" + (preview.animations ? " · 动作直接播放 AnimationClip" : "") + "</p></section>"
-            : "<div class='model-conversion-note'><strong>此静态版本尚未发布该模型的 WebGL 文件</strong><span>这里没有后台转换队列；当前仍可查看原始纹理和下载 Unity 包。</span></div>";
+            : unavailableMarkup;
+        var identityMarkup = metadata
+            ? "<span>作品 <strong>" + escapeHtml(bilingualLabel(metadata.titleZh, metadata.title)) + "</strong></span><span>角色 <strong>" + escapeHtml(bilingualLabel(metadata.characterZh, metadata.character)) + "</strong></span>"
+            : "";
         elements.detail.innerHTML = "<header class='model-detail-header'><div><span class='models-eyebrow'>" + escapeHtml(parts.kind.toUpperCase()) + " MODEL</span><h2 id='modelDetailTitle'>" + escapeHtml(parts.file.replace(/\.muast$/i, "")) + "</h2><p class='model-detail-path'>" + escapeHtml(model.name) + "</p></div><div class='model-detail-actions'><a href='" + detailUrl(model) + "' target='_blank' rel='noopener noreferrer'>官方详情 ↗</a><a href='" + rawAssetUrl(model) + "' target='_blank' rel='noopener noreferrer'>原始包 ↗</a></div></header>" +
-            "<div class='model-meta'><span>包大小 <strong>" + formatSize(model.size) + "</strong></span><span>可视纹理 <strong>" + spriteCount + " 个</strong></span><span>Bucket <strong>" + escapeHtml(bucketFor(model)) + "</strong></span></div>" +
+            "<div class='model-meta'>" + identityMarkup + "<span>包大小 <strong>" + formatSize(model.size) + "</strong></span><span>可视纹理 <strong>" + spriteCount + " 个</strong></span><span>Bucket <strong>" + escapeHtml(bucketFor(model)) + "</strong></span></div>" +
             previewMarkup +
             "<div class='model-texture-heading'><div><span class='models-eyebrow'>SOURCE TEXTURES</span><h3>模型纹理图集</h3></div><p>用于核对模型使用的原始贴图，不等同于模型本身。</p></div><div class='model-texture-grid' id='modelTextureGrid'></div>";
         var grid = document.getElementById("modelTextureGrid");
@@ -736,7 +825,11 @@
                 throw new Error("empty index");
             }
             renderDetailShell(model, spriteNames);
-            setStatus("已载入 " + state.allModels.length.toLocaleString("zh-CN") + " 个模型条目 · 当前显示 " + spriteNames.length + " 个纹理", "ready");
+            if (manifestState.error) {
+                setStatus("素材索引正常，但 WebGL 清单加载失败；可预览数量不会显示为错误的示例值", "error");
+            } else {
+                setStatus("已载入 " + state.allModels.length.toLocaleString("zh-CN") + " 个模型条目 · 当前显示 " + spriteNames.length + " 个纹理", "ready");
+            }
         }).catch(function () {
             if (requestId !== state.indexRequest) {
                 return;
@@ -756,11 +849,30 @@
             state.page = 1;
             applyFilter();
         });
+        if (elements.titleFilter) {
+            elements.titleFilter.addEventListener("change", function () {
+                state.titleId = elements.titleFilter.value;
+                state.page = 1;
+                if (state.titleId !== "all") {
+                    state.kind = "player";
+                    document.querySelectorAll(".models-filter").forEach(function (item) {
+                        item.classList.toggle("is-active", item.dataset.kind === "player");
+                    });
+                }
+                applyFilter();
+            });
+        }
         document.querySelectorAll(".models-filter").forEach(function (button) {
             button.addEventListener("click", function () {
                 document.querySelectorAll(".models-filter").forEach(function (item) { item.classList.remove("is-active"); });
                 button.classList.add("is-active");
                 state.kind = button.dataset.kind;
+                if (state.kind === "enemy" || state.kind === "weapon") {
+                    state.titleId = "all";
+                    if (elements.titleFilter) {
+                        elements.titleFilter.value = "all";
+                    }
+                }
                 state.page = 1;
                 applyFilter();
             });
@@ -789,13 +901,15 @@
             }
             return response.json();
         }).then(function (manifest) {
-            if (manifest && manifest.models && typeof manifest.models === "object") {
-                Object.keys(manifest.models).forEach(function (name) {
-                    MODEL_PREVIEWS[name] = manifest.models[name];
-                });
+            if (!manifest || !manifest.models || typeof manifest.models !== "object") {
+                throw new Error("invalid manifest");
             }
+            Object.keys(manifest.models).forEach(function (name) {
+                MODEL_PREVIEWS[name] = manifest.models[name];
+            });
+            manifestState.loaded = true;
         }).catch(function () {
-            // The bundled player preview remains available when the optional manifest cannot be read.
+            manifestState.error = true;
         });
     }
 
@@ -809,9 +923,14 @@
             state.allModels = entries.filter(function (entry) {
                 return entry && typeof entry.name === "string" && MODEL_PATH.test(entry.name);
             }).sort(function (a, b) { return a.name.localeCompare(b.name); });
+            populateTitleFilter();
             updateCounts();
             applyFilter();
-            setStatus("索引已载入 · " + state.allModels.length.toLocaleString("zh-CN") + " 个模型条目", "ready");
+            if (manifestState.error) {
+                setStatus("已载入 " + state.allModels.length.toLocaleString("zh-CN") + " 个索引条目，但 WebGL 清单读取失败；请检查部署文件", "error");
+            } else {
+                setStatus("索引与 WebGL 清单已载入 · " + state.allModels.length.toLocaleString("zh-CN") + " 个条目 · " + Object.keys(MODEL_PREVIEWS).length.toLocaleString("zh-CN") + " 个可预览", "ready");
+            }
             var hashModel = modelFromHash();
             var defaultModel = state.allModels.find(function (model) {
                 return model.name === "model/player/model_pl_140106.muast";
@@ -830,6 +949,7 @@
         });
     }
 
+    buildPlayerMetadata();
     bindControls();
     loadPreviewManifest().then(loadDatabase);
 })();

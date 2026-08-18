@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://database.kirafan.cn" crossorigin>
     <link rel="preconnect" href="https://asset.kirafan.cn" crossorigin>
     <link rel="preconnect" href="https://bucket-a-asset.kirafan.cn" crossorigin>
-    <link rel="stylesheet" href="css/models.css?v=20260818-1">
+    <link rel="stylesheet" href="css/models.css?v=20260818-2">
     <link rel="icon" href="favicon.png">
 </head>
 
@@ -46,10 +46,18 @@
 
         <section class="models-workbench" aria-label="模型素材浏览器">
             <div class="models-toolbar">
-                <label class="models-search">
-                    <span>搜索模型名称</span>
-                    <input id="modelSearch" type="search" placeholder="例如：model_pl_140106、model_en" autocomplete="off">
-                </label>
+                <div class="models-query-tools">
+                    <label class="models-search">
+                        <span>搜索模型名称、角色或作品</span>
+                        <input id="modelSearch" type="search" placeholder="例如：乃莉、向阳素描、model_pl_100402" autocomplete="off">
+                    </label>
+                    <label class="models-work-filter">
+                        <span>作品筛选</span>
+                        <select id="modelTitleFilter" aria-label="按作品筛选">
+                            <option value="all">全部作品</option>
+                        </select>
+                    </label>
+                </div>
                 <div class="models-filters" role="group" aria-label="模型分类">
                     <button class="models-filter is-active" type="button" data-kind="all">全部 <span data-count="all">—</span></button>
                     <button class="models-filter" type="button" data-kind="ready">可预览 <span data-count="ready">—</span></button>
@@ -109,7 +117,8 @@
             }
         }
     </script>
-    <script src="models.js?v=20260818-5"></script>
+    <script src="asset/gacha/cards.js?v=20260818-4"></script>
+    <script src="models.js?v=20260818-6"></script>
 </body>
 
 </html>

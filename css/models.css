@@ -93,14 +93,16 @@ main { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 54
 
 .models-workbench { margin-top: 24px; border: 1px solid var(--model-line); border-radius: 8px; background: var(--model-panel); box-shadow: 0 14px 32px rgba(74,51,60,0.09); }
 .models-toolbar { display: flex; align-items: end; justify-content: space-between; gap: 18px; padding: 22px 24px 18px; border-bottom: 1px solid var(--model-line); }
-.models-search { display: grid; gap: 6px; width: min(430px, 100%); color: var(--model-muted); font-size: 0.72rem; font-weight: 700; }
-.models-search input { width: 100%; padding: 10px 13px; border: 1px solid #d9cbd0; border-radius: 4px; outline: none; background: #fffdfb; color: var(--model-ink); }
-.models-search input:focus { border-color: var(--model-teal); box-shadow: 0 0 0 3px rgba(75,140,137,0.15); }
+.models-query-tools { display: grid; grid-template-columns: minmax(260px, 430px) minmax(190px, 280px); align-items: end; gap: 10px; width: min(720px, 100%); }
+.models-search, .models-work-filter { display: grid; gap: 6px; color: var(--model-muted); font-size: 0.72rem; font-weight: 700; }
+.models-search input, .models-work-filter select { width: 100%; min-height: 39px; padding: 9px 13px; border: 1px solid #d9cbd0; border-radius: 4px; outline: none; background: #fffdfb; color: var(--model-ink); }
+.models-search input:focus, .models-work-filter select:focus { border-color: var(--model-teal); box-shadow: 0 0 0 3px rgba(75,140,137,0.15); }
 .models-filters { display: flex; flex-wrap: wrap; gap: 6px; }
 .models-filter { padding: 8px 12px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--model-muted); cursor: pointer; font-size: 0.78rem; }
 .models-filter span { margin-left: 4px; color: #a4949a; font-variant-numeric: tabular-nums; }
 .models-filter:hover { background: #f3e9e8; color: var(--model-rose); }
 .models-filter.is-active { border-color: #d4a9b1; background: #f7e7e9; color: var(--model-rose); font-weight: 700; }
+.models-filter:disabled { opacity: 0.58; cursor: not-allowed; }
 
 .models-status { min-height: 35px; display: flex; align-items: center; padding: 8px 24px; border-bottom: 1px solid #eee4e2; color: var(--model-muted); font-size: 0.76rem; }
 .models-status[data-tone="ready"] { color: var(--model-teal); }
@@ -118,7 +120,7 @@ main { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 54
 .model-list-icon { width: 42px; height: 42px; flex: 0 0 auto; border: 1px solid #e3d8d8; border-radius: 3px; object-fit: contain; background-color: #fff; background-image: linear-gradient(45deg, #eee 25%, transparent 25%), linear-gradient(-45deg, #eee 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #eee 75%), linear-gradient(-45deg, transparent 75%, #eee 75%); background-position: 0 0, 0 6px, 6px -6px, -6px 0; background-size: 12px 12px; }
 .model-list-copy { min-width: 0; display: grid; gap: 2px; }
 .model-list-copy strong { overflow: hidden; color: #4a3740; font-size: 0.76rem; text-overflow: ellipsis; white-space: nowrap; }
-.model-list-copy small { color: var(--model-muted); font-size: 0.67rem; }
+.model-list-copy small { overflow: hidden; color: var(--model-muted); font-size: 0.67rem; text-overflow: ellipsis; white-space: nowrap; }
 .model-list-arrow { margin-left: auto; color: #ad8e9a; font-size: 1.2rem; }
 .models-list-empty { padding: 26px 14px; color: var(--model-muted); font-size: 0.8rem; text-align: center; }
 .models-list-empty a { color: var(--model-rose); }
@@ -220,6 +222,7 @@ main { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 54
     .models-hero-art { inset: auto 0 0; height: 44%; opacity: 0.42; }
     .models-hero-art::after { background: linear-gradient(180deg, rgba(48,38,44,0.96), rgba(48,38,44,0.14)); }
     .models-toolbar { align-items: stretch; flex-direction: column; padding: 16px; }
+    .models-query-tools { grid-template-columns: 1fr; }
     .models-filters { justify-content: stretch; }
     .models-filter { flex: 1 1 auto; }
     .models-status { padding-inline: 16px; }
