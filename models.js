@@ -2,7 +2,7 @@
     "use strict";
 
     var DATABASE_URL = "https://database.kirafan.cn/assetBundle.json";
-    var MODEL_MANIFEST_URL = "asset/models/manifest.json?v=20260818-4";
+    var MODEL_MANIFEST_URL = "asset/models/manifest.json?v=20260818-5";
     var ASSET_HOST = "https://asset.kirafan.cn/";
     var INDEX_PAGE_SIZE = 30;
     var MODEL_PATH = /^model\/(player|enemy|weapon|shadow)\//;
@@ -81,7 +81,8 @@
                     title: card.title,
                     titleZh: card.titleZh,
                     character: card.character,
-                    characterZh: card.characterZh
+                    characterZh: card.characterZh,
+                    class: card.class
                 };
             });
         });
@@ -291,16 +292,19 @@
         var preview = MODEL_PREVIEWS[model.name];
         var metadata = modelMetadata(model);
         var actionMarkup = preview && preview.animations
-            ? "<div class='model-action-strip' role='group' aria-label='游戏预设动作'><span>动作预设</span><button class='is-active' type='button' data-model-action='idle' data-clip='room_idle_L' aria-pressed='true' title='Common_body@room_idle_L'>待机<small>room_idle_L</small></button><button type='button' data-model-action='run' data-clip='battle_run' aria-pressed='false' title='Common_body@battle_run'>战斗跑动<small>battle_run</small></button><button type='button' data-model-action='damage' data-clip='damage' aria-pressed='false' title='Common_body@damage'>受击<small>damage</small></button><button type='button' data-model-action='jump' data-clip='kirarajump_0' aria-pressed='false' title='Common_body@kirarajump_0'>跳跃<small>kirarajump_0</small></button><button type='button' data-model-action='win' data-clip='win_st_0' aria-pressed='false' title='Common_body@win_st_0'>胜利<small>win_st_0</small></button></div>"
+            ? "<div id='modelActionStrip' class='model-action-strip' role='group' aria-label='游戏动作'><span>动作</span></div>"
             : "";
-        var faceMarkup = preview && preview.expressions
-            ? "<div class='model-face-strip' role='group' aria-label='表情预设'><span>表情</span><button class='is-active' type='button' id='modelFaceAuto' aria-pressed='true'>跟随动作</button><button type='button' data-face-preset='normal' aria-pressed='false'>通常</button><button type='button' data-face-preset='smile' aria-pressed='false'>微笑</button><button type='button' data-face-preset='happy' aria-pressed='false'>开心</button><button type='button' data-face-preset='angry' aria-pressed='false'>生气</button><button type='button' data-face-preset='sad' aria-pressed='false'>难过</button><button type='button' data-face-preset='surprised' aria-pressed='false'>惊讶</button></div><details class='model-face-advanced' id='modelFaceAdvanced'><summary>展开全部表情组件</summary><div id='modelFaceControls' class='model-face-controls'></div></details>"
+        var faceMarkup = preview
+            ? "<div id='modelFaceInterface'" + (preview.expressions ? "" : " hidden") + "><div class='model-face-strip' role='group' aria-label='表情预设'><span>表情</span><button class='is-active' type='button' id='modelFaceAuto' aria-pressed='true'>跟随动作</button><button type='button' data-face-preset='normal' aria-pressed='false'>通常</button><button type='button' data-face-preset='smile' aria-pressed='false'>微笑</button><button type='button' data-face-preset='happy' aria-pressed='false'>开心</button><button type='button' data-face-preset='angry' aria-pressed='false'>生气</button><button type='button' data-face-preset='sad' aria-pressed='false'>难过</button><button type='button' data-face-preset='surprised' aria-pressed='false'>惊讶</button></div><details class='model-face-advanced' id='modelFaceAdvanced'><summary>展开全部表情组件</summary><div id='modelFaceControls' class='model-face-controls'></div></details></div>"
             : "";
         var unavailableMarkup = manifestState.error
             ? "<div class='model-conversion-note'><strong>WebGL 模型清单未能载入</strong><span>纹理索引正常；请刷新页面，或检查部署中是否包含 asset/models/manifest.json。</span></div>"
             : "<div class='model-conversion-note'><strong>该条目的原始模型包当前不可用</strong><span>源素材索引仍保留条目，但转换时无法取得 Unity 包；透明纹理仍可正常查看。</span></div>";
+        var adjustMarkup = preview
+            ? "<div class='model-adjust-drawer' id='modelAdjustDrawer' hidden><label>模型大小 <input id='modelScaleRange' type='range' min='60' max='160' value='100' step='1'><output id='modelScaleValue'>100%</output></label><label>上下位置 <input id='modelVerticalRange' type='range' min='-50' max='50' value='0' step='1'><output id='modelVerticalValue'>0</output></label></div>"
+            : "";
         var previewMarkup = preview
-            ? "<section class='model-3d-card' aria-label='游戏模型预览'><div class='model-3d-toolbar'><div><span class='model-live-badge'><i aria-hidden='true'></i>LIVE WEBGL</span><strong>游戏模型预览</strong><small>" + escapeHtml(preview.label) + "</small></div><div class='model-3d-actions'>" + (preview.animations ? "<button id='modelMotionToggle' type='button' aria-pressed='true'>暂停动作</button>" : "") + "<button id='modelViewReset' type='button'>重置视角</button></div></div>" + actionMarkup + faceMarkup + "<div id='model3dCanvas' class='model-3d-canvas'><div class='model-3d-loading'><span class='model-spinner' aria-hidden='true'></span><p>正在读取模型数据……</p></div></div><p class='model-3d-help'>拖动微调视角 · 滚轮缩放 · 2.5D 部件按游戏原始层级叠放" + (preview.animations ? " · 动作直接播放 AnimationClip" : "") + "</p></section>"
+            ? "<section class='model-3d-card' aria-label='游戏模型预览'><div class='model-3d-toolbar'><div><span class='model-live-badge'><i aria-hidden='true'></i>LIVE WEBGL</span><strong>游戏模型预览</strong><small>" + escapeHtml(preview.label) + "</small></div><div class='model-3d-actions'>" + (preview.animations ? "<button id='modelMotionToggle' type='button' aria-pressed='true'>暂停动作</button>" : "") + "<button id='modelAdjustToggle' type='button' aria-expanded='false'>视图调整</button><button id='modelViewReset' type='button'>重置视角</button></div></div>" + actionMarkup + faceMarkup + adjustMarkup + "<div id='model3dCanvas' class='model-3d-canvas'><div class='model-3d-loading'><span class='model-spinner' aria-hidden='true'></span><p>正在读取模型数据……</p></div></div><p class='model-3d-help'>拖动旋转 · 右键或双指移动 · 滚轮缩放 · 模型按游戏原始层级叠放" + (preview.animations ? " · 动作直接播放 AnimationClip" : "") + "</p></section>"
             : unavailableMarkup;
         var identityMarkup = metadata
             ? "<span>作品 <strong>" + escapeHtml(bilingualLabel(metadata.titleZh, metadata.title)) + "</strong></span><span>角色 <strong>" + escapeHtml(bilingualLabel(metadata.characterZh, metadata.character)) + "</strong></span>"
@@ -317,17 +321,25 @@
             grid.appendChild(card);
         });
         if (preview) {
-            mount3DModel(preview);
+            mount3DModel(preview, metadata, parts.kind);
         }
     }
 
-    function mount3DModel(preview) {
+    function mount3DModel(preview, metadata, modelKind) {
         var host = document.getElementById("model3dCanvas");
         var motionButton = document.getElementById("modelMotionToggle");
         var resetButton = document.getElementById("modelViewReset");
+        var adjustButton = document.getElementById("modelAdjustToggle");
+        var adjustDrawer = document.getElementById("modelAdjustDrawer");
+        var scaleRange = document.getElementById("modelScaleRange");
+        var scaleValue = document.getElementById("modelScaleValue");
+        var verticalRange = document.getElementById("modelVerticalRange");
+        var verticalValue = document.getElementById("modelVerticalValue");
+        var actionStrip = document.getElementById("modelActionStrip");
         var faceControls = document.getElementById("modelFaceControls");
+        var faceInterface = document.getElementById("modelFaceInterface");
         var faceAutoButton = document.getElementById("modelFaceAuto");
-        var actionButtons = Array.prototype.slice.call(document.querySelectorAll("[data-model-action]"));
+        var actionButtons = [];
         var faceButtons = Array.prototype.slice.call(document.querySelectorAll("[data-face-preset]"));
         if (!host || !resetButton) {
             return;
@@ -366,8 +378,10 @@
             var disposed = false;
             var animationFrame = 0;
             var previousFrame = window.performance.now();
-            var objectUrl = null;
+            var objectUrls = [];
             var homeView = null;
+            var modelHeight = 1;
+            var baseRotationZ = 0;
             var lastViewportWidth = 0;
             var lastViewportHeight = 0;
             var faceParts = { eye: {}, eyebrow: {}, mouth: {}, overlay: {} };
@@ -411,8 +425,16 @@
                     return;
                 }
                 modelObject.position.set(0, 0, 0);
-                modelObject.rotation.set(0, 0, 0);
+                modelObject.rotation.set(0, 0, baseRotationZ);
                 modelObject.scale.setScalar(1);
+                if (scaleRange) {
+                    scaleRange.value = "100";
+                    scaleValue.textContent = "100%";
+                }
+                if (verticalRange) {
+                    verticalRange.value = "0";
+                    verticalValue.textContent = "0";
+                }
             }
 
             function fitModelView() {
@@ -422,6 +444,7 @@
                 }
                 var center = bounds.getCenter(new THREE.Vector3());
                 var size = bounds.getSize(new THREE.Vector3());
+                modelHeight = Math.max(size.y, 0.1);
                 var visibleSize = Math.max(size.y, size.x / Math.max(0.4, camera.aspect), 0.1);
                 var distance = (visibleSize * 0.5) / Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5));
                 distance *= 1.28;
@@ -432,6 +455,49 @@
                 controls.minDistance = Math.max(0.05, distance * 0.38);
                 controls.maxDistance = Math.max(2, distance * 4);
                 resetView();
+            }
+
+            function friendlyActionName(name) {
+                return {
+                    room_idle_L: "待机",
+                    idle: "待机",
+                    battle_run: "战斗跑动",
+                    damage: "受击",
+                    kirarajump_0: "跳跃",
+                    win_st_0: "胜利",
+                    charge_skill: "技能蓄力",
+                    skill_0: "技能 1",
+                    skill_1: "技能 2",
+                    dead: "倒下",
+                    abnormal: "异常状态"
+                }[name] || name.replace(/_/g, " ");
+            }
+
+            function mountActionControls(clips) {
+                if (!actionStrip) {
+                    return;
+                }
+                actionStrip.querySelectorAll("button").forEach(function (button) { button.remove(); });
+                actionButtons = [];
+                clips.forEach(function (clip, index) {
+                    var button = document.createElement("button");
+                    button.type = "button";
+                    button.dataset.modelAction = clip.name;
+                    button.dataset.clip = clip.name;
+                    button.setAttribute("aria-pressed", String(index === 0));
+                    button.innerHTML = escapeHtml(friendlyActionName(clip.name)) + "<small>" + escapeHtml(clip.name) + "</small>";
+                    button.addEventListener("click", function () {
+                        if (!motionEnabled && motionButton) {
+                            motionEnabled = true;
+                            motionButton.setAttribute("aria-pressed", "true");
+                            motionButton.textContent = "暂停动作";
+                            mixer.timeScale = 1;
+                        }
+                        selectAction(clip.name);
+                    });
+                    actionButtons.push(button);
+                    actionStrip.appendChild(button);
+                });
             }
 
             function selectAction(action) {
@@ -601,7 +667,8 @@
             resize();
             controls.enableDamping = true;
             controls.dampingFactor = 0.08;
-            controls.enablePan = false;
+            controls.enablePan = true;
+            controls.screenSpacePanning = true;
             controls.minAzimuthAngle = -Math.PI / 12;
             controls.maxAzimuthAngle = Math.PI / 12;
             controls.minPolarAngle = Math.PI / 2 - Math.PI / 18;
@@ -654,9 +721,59 @@
                     }
                     return blob;
                 }).then(function (blob) {
-                    objectUrl = URL.createObjectURL(blob);
+                    var objectUrl = URL.createObjectURL(blob);
+                    objectUrls.push(objectUrl);
                     return objectUrl;
                 });
+            }
+
+            function defaultWeaponPreview() {
+                if (!metadata || !Number.isFinite(metadata.class)) {
+                    return null;
+                }
+                var weaponId = String(1000 + metadata.class * 100);
+                return MODEL_PREVIEWS["model/weapon/wpn_" + weaponId + ".muast"] || null;
+            }
+
+            function attachDefaultWeapon(loader) {
+                var weaponPreview = defaultWeaponPreview();
+                if (!weaponPreview || !modelObject) {
+                    return Promise.resolve();
+                }
+                return cacheModel(weaponPreview.file, weaponPreview.compression).then(function (sourceUrl) {
+                    return new Promise(function (resolve) {
+                        loader.load(sourceUrl, function (weaponGltf) {
+                            var parts = [];
+                            weaponGltf.scene.children.slice().forEach(function (child) {
+                                if (/_[LR]$/i.test(child.name)) {
+                                    parts.push(child);
+                                }
+                            });
+                            parts.forEach(function (part) {
+                                var side = /_L$/i.test(part.name) ? "L" : "R";
+                                var socket = modelObject.getObjectByName("Loc_" + side)
+                                    || modelObject.getObjectByName("Weapon_" + side);
+                                if (!socket) {
+                                    return;
+                                }
+                                socket.add(part);
+                                part.position.set(0, 0, 0);
+                                part.rotation.set(0, 0, 0);
+                                part.scale.setScalar(1);
+                                part.traverse(function (child) {
+                                    if (child.isMesh && child.material) {
+                                        child.material.transparent = true;
+                                        child.material.alphaTest = 0.015;
+                                        child.material.depthWrite = true;
+                                        child.material.depthTest = true;
+                                        child.material.side = THREE.DoubleSide;
+                                    }
+                                });
+                            });
+                            resolve();
+                        }, undefined, resolve);
+                    });
+                }).catch(function () { return; });
             }
 
             cacheModel(preview.file, preview.compression).then(function (sourceUrl) {
@@ -669,18 +786,40 @@
                     modelObject = gltf.scene;
                     resetModelTransform();
                     modelObject.traverse(function (child) {
+                        var isPlayer = Boolean(metadata);
+                        var loweredName = String(child.name || "").toLowerCase();
+                        if (!isPlayer && (/^[lrt]\d+_/.test(loweredName) && loweredName.indexOf("l30_") !== 0
+                            || /(damage|abnormal|flash|blur)/.test(loweredName))) {
+                            child.visible = false;
+                        }
+                        if (!child.userData.facePart && loweredName.indexOf("l30_") === 0) {
+                            var partName = child.name.slice(4);
+                            if (/^eye_/.test(partName)) {
+                                child.userData.facePart = { kind: "eye", name: partName };
+                            } else if (/^eyebrrow_/.test(partName)) {
+                                child.userData.facePart = { kind: "eyebrow", name: partName };
+                            } else if (/^mouth_/.test(partName)) {
+                                child.userData.facePart = { kind: "mouth", name: partName };
+                            } else if (partName === "cry" || /^tere_/.test(partName)) {
+                                child.userData.facePart = { kind: "overlay", name: partName };
+                            }
+                        }
                         if (child.isMesh && child.material) {
-                            var isLayeredPlayer = Boolean(preview.expressions);
                             // The original player shader uses SrcAlpha blending
                             // with depth writes and depth testing.  The converted
                             // meshes stay double-sided because mirrored left/right
                             // pieces do not share a reliable GLB winding direction.
                             child.material.transparent = true;
-                            child.material.alphaTest = isLayeredPlayer ? 0.01 : 0.015;
-                            child.material.depthWrite = isLayeredPlayer;
+                            child.material.alphaTest = 0.01;
+                            child.material.depthWrite = preview.depthWrite !== false;
                             child.material.depthTest = true;
                             child.material.side = THREE.DoubleSide;
                             child.renderOrder = Number(child.userData.renderOrder || (child.geometry && child.geometry.userData.renderOrder) || 0);
+                            if (isPlayer && /hand/.test(loweredName)) {
+                                child.material = child.material.clone();
+                                child.material.transparent = false;
+                                child.material.alphaTest = 0;
+                            }
                         }
                         var facePart = child.userData && child.userData.facePart;
                         if (facePart && faceParts[facePart.kind]) {
@@ -692,13 +831,25 @@
                     gltf.animations.forEach(function (clip) {
                         clipByName[clip.name] = clip;
                     });
+                    mountActionControls(gltf.animations);
                     mountFaceControls();
+                    if (faceInterface) {
+                        faceInterface.hidden = !Object.keys(faceParts).some(function (kind) {
+                            return Object.keys(faceParts[kind]).length > 0;
+                        });
+                    }
+                    activeAction = clipByName.room_idle_L ? "room_idle_L" : clipByName.idle ? "idle" : gltf.animations[0] && gltf.animations[0].name;
                     selectFace(actionFacePresets[activeAction] || "normal", true);
-                    selectAction("idle");
+                    if (activeAction) {
+                        selectAction(activeAction);
+                    }
                     mixer.update(0);
                     modelObject.updateMatrixWorld(true);
-                    fitModelView();
-                    host.classList.add("is-ready");
+                    attachDefaultWeapon(loader).then(function () {
+                        modelObject.updateMatrixWorld(true);
+                        fitModelView();
+                        host.classList.add("is-ready");
+                    });
                 }, undefined, function () {
                     host.innerHTML = "<div class='model-3d-error'>GLB 模型加载失败，请刷新后重试。</div>";
                 });
@@ -717,9 +868,40 @@
                 });
             }
             resetButton.addEventListener("click", function () {
+                resetModelTransform();
                 resetView();
-                selectAction("idle");
+                if (clipByName.room_idle_L) {
+                    selectAction("room_idle_L");
+                } else if (clipByName.idle) {
+                    selectAction("idle");
+                }
             });
+            if (adjustButton && adjustDrawer) {
+                adjustButton.addEventListener("click", function () {
+                    var expanded = adjustButton.getAttribute("aria-expanded") !== "true";
+                    adjustButton.setAttribute("aria-expanded", String(expanded));
+                    adjustDrawer.hidden = !expanded;
+                });
+            }
+            if (scaleRange) {
+                scaleRange.addEventListener("input", function () {
+                    if (!modelObject) {
+                        return;
+                    }
+                    var scale = Number(scaleRange.value) / 100;
+                    modelObject.scale.setScalar(scale);
+                    scaleValue.textContent = scaleRange.value + "%";
+                });
+            }
+            if (verticalRange) {
+                verticalRange.addEventListener("input", function () {
+                    if (!modelObject) {
+                        return;
+                    }
+                    modelObject.position.y = Number(verticalRange.value) / 100 * modelHeight;
+                    verticalValue.textContent = verticalRange.value;
+                });
+            }
             actionButtons.forEach(function (button) {
                 button.addEventListener("click", function () {
                     if (!motionEnabled && motionButton) {
@@ -812,9 +994,7 @@
                     });
                 }
                 renderer.dispose();
-                if (objectUrl) {
-                    URL.revokeObjectURL(objectUrl);
-                }
+                objectUrls.forEach(function (objectUrl) { URL.revokeObjectURL(objectUrl); });
                 if (resizeObserver) {
                     resizeObserver.disconnect();
                 } else {

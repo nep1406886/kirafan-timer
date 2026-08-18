@@ -16,11 +16,12 @@ async function fetchJson(name) {
     return response.json();
 }
 
-const [characters, namedCharacters, titles, translations, assetBundles, version, translationVersion] = await Promise.all([
+const [characters, namedCharacters, titles, translations, englishTranslations, assetBundles, version, translationVersion] = await Promise.all([
     fetchJson("CharacterList"),
     fetchJson("NamedList"),
     fetchJson("TitleList"),
     fetch(`${TRANSLATION_ROOT}/zh.json`).then((response) => response.json()),
+    fetch(`${TRANSLATION_ROOT}/en.json`).then((response) => response.json()),
     fetch(`${DATABASE_ROOT}/../assetBundle.json`).then((response) => response.json()),
     fetch(`${DATABASE_ROOT}/../version`).then((response) => response.text()),
     fetch(`${TRANSLATION_ROOT}/version`).then((response) => response.text())
@@ -33,6 +34,61 @@ const assetNames = new Set(assetBundles.map((item) => item.name));
 
 function fullIllustrationName(id) {
     return `texture/charauiresource/charaillustfull/charaillust_full_${id}.muast`;
+}
+
+const nameSuffixes = {
+    zh: {
+        "水着": "泳装",
+        "温泉": "温泉",
+        "七夕": "七夕",
+        "第2部": "第2部",
+        "ブライダル": "婚礼",
+        "成長版": "成长版",
+        "大人版": "成人版"
+    },
+    en: {
+        "水着": "Swimsuit",
+        "温泉": "Onsen",
+        "七夕": "Tanabata",
+        "第2部": "Part 2",
+        "ブライダル": "Bridal",
+        "成長版": "Grown-up",
+        "大人版": "Adult"
+    }
+};
+
+const titleOverrides = {
+    zh: {
+        "RPG不動産": "RPG不动产",
+        "スローループ": "Slow Loop",
+        "ぱわーおぶすまいる。": "Power of Smile",
+        "ぼっち・ざ・ろっく！": "孤独摇滚！",
+        "まんがタイム": "Manga Time"
+    },
+    en: {
+        "RPG不動産": "RPG Real Estate",
+        "スローループ": "Slow Loop",
+        "ぱわーおぶすまいる。": "Power of Smile",
+        "ぼっち・ざ・ろっく！": "Bocchi the Rock!",
+        "まんがタイム": "Manga Time"
+    }
+};
+
+function translateName(source, translations, language) {
+    if (translations[source]) {
+        return translations[source];
+    }
+    const variant = /^(.*?)【([^】]+)】$/.exec(source);
+    if (!variant) {
+        return source;
+    }
+    const base = translations[variant[1]] || variant[1];
+    const suffix = nameSuffixes[language][variant[2]] || variant[2];
+    return `${base}【${suffix}】`;
+}
+
+function translateTitle(source, translations, language) {
+    return titleOverrides[language][source] || translations[source] || source;
 }
 
 const cards = characters
@@ -58,11 +114,14 @@ const cards = characters
         return {
             id: card.m_CharaID,
             name: card.m_Name,
-            nameZh: translations[card.m_Name] || card.m_Name,
+            nameZh: translateName(card.m_Name, translations, "zh"),
+            nameEn: translateName(card.m_Name, englishTranslations, "en"),
             character: named.fullName || named.m_FullName || named.m_NickName,
             characterZh: translations[named.fullName || named.m_FullName || named.m_NickName] || named.fullName || named.m_FullName || named.m_NickName,
+            characterEn: englishTranslations[named.fullName || named.m_FullName || named.m_NickName] || named.fullName || named.m_FullName || named.m_NickName,
             title: title.m_DisplayName,
-            titleZh: translations[title.m_DisplayName] || title.m_DisplayName,
+            titleZh: translateTitle(title.m_DisplayName, translations, "zh"),
+            titleEn: translateTitle(title.m_DisplayName, englishTranslations, "en"),
             titleId: named.m_TitleType,
             namedType: card.m_NamedType,
             resourceId: card.m_ResourceID,
@@ -105,7 +164,8 @@ const includedTitles = titles
     .map((title) => ({
         id: title.m_TitleType,
         name: title.m_DisplayName,
-        nameZh: translations[title.m_DisplayName] || title.m_DisplayName
+        nameZh: translateTitle(title.m_DisplayName, translations, "zh"),
+        nameEn: translateTitle(title.m_DisplayName, englishTranslations, "en")
     }))
     .sort((left, right) => left.name.localeCompare(right.name, "ja"));
 
@@ -125,7 +185,8 @@ const payload = {
             "https://database.kirafan.cn/database/NamedList.json",
             "https://database.kirafan.cn/database/TitleList.json",
             "https://database.kirafan.cn/assetBundle.json",
-            "https://trans.kirafan.cn/zh.json"
+            "https://trans.kirafan.cn/zh.json",
+            "https://trans.kirafan.cn/en.json"
         ]
     },
     titles: includedTitles,

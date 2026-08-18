@@ -13,6 +13,7 @@ import hashlib
 import io
 import json
 import math
+import re
 import struct
 from pathlib import Path
 from typing import Any, Iterable
@@ -182,6 +183,7 @@ class KirafanExporter:
     }
 
     def __init__(self, model_bundle: Path, animation_dir: Path) -> None:
+        self.model_bundle = model_bundle
         self.environment = UnityPy.load(str(model_bundle))
         self.animation_dir = animation_dir
         self.builder = GlbBuilder()
@@ -192,7 +194,7 @@ class KirafanExporter:
             pptr_id(transform.m_GameObject): transform for transform in self.transforms.values()
         }
         self.node_for_transform: dict[int, int] = {}
-        self.path_maps: dict[str, dict[str, int]] = {"body": {}, "head": {}}
+        self.path_maps: dict[str, dict[str, int]] = {"body": {}, "head": {}, "generic": {}}
         self.skin_cache: dict[tuple[Any, ...], int] = {}
         self.render_orders = self.read_render_orders()
         root_names = [self.object_name(transform).lower() for transform in self.transforms.values()]
@@ -277,6 +279,13 @@ class KirafanExporter:
             ]
             if anchors:
                 self.collect_animation_paths(kind, anchors[0], anchor_name)
+        # Enemy animation bundles address a single hierarchy rooted at `root`.
+        # Keep a separate map so their clips cannot collide with player head/body paths.
+        generic_anchor_names = {"root", "Head_root", "LOC_overhead", "LOC_WPN_8200"}
+        for transform in self.transforms.values():
+            name = self.object_name(transform)
+            if name in generic_anchor_names or name.startswith("LOC_WPN_"):
+                self.collect_animation_paths("generic", transform, name)
 
     def collect_animation_paths(self, kind: str, transform: Any, path: str) -> None:
         transform_id = transform.object_reader.path_id
@@ -382,7 +391,7 @@ class KirafanExporter:
             return {"kind": "overlay", "name": part}
         return None
 
-    def add_meshes(self, materials: dict[str, int]) -> None:
+    def add_meshes(self, materials: dict[int, int]) -> None:
         for item in self.environment.objects:
             if item.type.name != "SkinnedMeshRenderer":
                 continue
@@ -394,12 +403,18 @@ class KirafanExporter:
             name = renderer.m_GameObject.read().m_Name
             if kind not in {"body", "head"} or (kind == "head" and not self.include_head_renderer(name)):
                 continue
-            self.add_skinned_renderer(renderer, transform, kind, materials[kind])
+            self.add_skinned_renderer(renderer, transform, kind, self.renderer_material(renderer, materials))
 
     @staticmethod
     def include_generic_renderer(name: str) -> bool:
         lowered = name.lower()
-        return not any(marker in lowered for marker in ("damage", "abnormal", "flash"))
+        if any(marker in lowered for marker in ("damage", "abnormal", "flash", "blur")):
+            return False
+        # Unity exports several camera-facing variants.  L30 is the front-facing
+        # layer used by the viewer; keeping all variants causes duplicated limbs
+        # and face layers in the bind pose.
+        direction = re.search(r"(?:^|_)(?:l|r)?(30|60)(?:_|$)", lowered)
+        return direction is None or direction.group(1) == "30"
 
     def renderer_material(self, renderer: Any, materials: dict[int, int]) -> int:
         if renderer.m_Materials:
@@ -419,7 +434,8 @@ class KirafanExporter:
             elif item.type.name == "MeshRenderer":
                 renderer = item.read()
                 transform = self.transform_for_game_object.get(pptr_id(renderer.m_GameObject))
-                if transform is not None:
+                name = renderer.m_GameObject.read().m_Name
+                if transform is not None and self.include_generic_renderer(name):
                     self.add_static_renderer(renderer, transform, self.renderer_material(renderer, materials))
 
     def add_static_renderer(self, renderer: Any, transform: Any, material: int) -> None:
@@ -527,7 +543,7 @@ class KirafanExporter:
         node["mesh"] = mesh_index
         node["skin"] = skin_index
         node["extras"] = {"renderOrder": self.render_orders.get(mesh.m_Name, 0)}
-        face_part = self.face_part(renderer.m_GameObject.read().m_Name) if kind == "head" else None
+        face_part = self.face_part(renderer.m_GameObject.read().m_Name)
         if face_part:
             node["extras"]["facePart"] = face_part
 
@@ -548,6 +564,20 @@ class KirafanExporter:
             animation = {"name": action, "samplers": [], "channels": []}
             self.add_clip_channels(animation, cache[body_bundle][action], "body")
             self.add_clip_channels(animation, cache[head_bundle][action], "head")
+            if animation["channels"]:
+                self.builder.document["animations"].append(animation)
+
+    def add_generic_animations(self) -> None:
+        match = re.search(r"model_en_(\d+)\.muast$", self.model_bundle.name, re.IGNORECASE)
+        if not match:
+            return
+        bundle = self.animation_dir / f"common_en_{match.group(1)}.muast"
+        if not bundle.is_file():
+            return
+        clips = self.load_clips(bundle.name)
+        for clip_name, clip in clips.items():
+            animation = {"name": clip_name, "samplers": [], "channels": []}
+            self.add_clip_channels(animation, clip, "generic")
             if animation["channels"]:
                 self.builder.document["animations"].append(animation)
 
@@ -586,12 +616,17 @@ class KirafanExporter:
     def export(self, output: Path) -> None:
         self.add_hierarchy()
         if self.mode == "player":
-            materials = self.add_materials()
+            # Player renderers reference distinct body/head/outline materials.
+            # Using the source material map preserves the opaque outline atlas
+            # used by hands and shoes instead of forcing every renderer through
+            # the body alpha atlas.
+            materials = self.add_generic_materials()
             self.add_meshes(materials)
             self.add_animations()
         else:
             materials = self.add_generic_materials()
             self.add_generic_meshes(materials)
+            self.add_generic_animations()
         self.builder.write(output)
         print(
             f"Wrote {output} ({output.stat().st_size:,} bytes, {self.mode}, "

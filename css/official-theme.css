@@ -53,6 +53,39 @@ textarea {
     pointer-events: none;
 }
 
+.hero-ambient {
+    --ambient-x: 0px;
+    --ambient-y: 0px;
+    position: absolute;
+    z-index: 1;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    transform: translate3d(var(--ambient-x), var(--ambient-y), 0);
+}
+
+.hero-ambient span {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--official-pink);
+    opacity: 0.28;
+    transform: rotate(45deg);
+    animation: hero-ambient-drift 6.8s ease-in-out infinite alternate;
+}
+
+.hero-ambient span:nth-child(1) { left: 8%; top: 17%; }
+.hero-ambient span:nth-child(2) { left: 54%; top: 11%; width: 8px; height: 8px; border-color: var(--official-blue); animation-delay: -1.4s; }
+.hero-ambient span:nth-child(3) { right: 8%; top: 26%; width: 15px; height: 15px; border-color: #d8aa00; animation-delay: -3.2s; }
+.hero-ambient span:nth-child(4) { left: 33%; top: 48%; width: 7px; height: 7px; border-color: var(--official-cyan); animation-delay: -4.6s; }
+.hero-ambient span:nth-child(5) { right: 24%; top: 58%; width: 10px; height: 10px; animation-delay: -2.1s; }
+.hero-ambient span:nth-child(6) { left: 13%; top: 72%; width: 9px; height: 9px; border-color: var(--official-blue); animation-delay: -5.3s; }
+
+@keyframes hero-ambient-drift {
+    from { opacity: 0.12; transform: translateY(-5px) rotate(39deg) scale(0.88); }
+    to { opacity: 0.38; transform: translateY(7px) rotate(51deg) scale(1.08); }
+}
+
 .official-hero-carousel {
     position: relative;
     z-index: 2;
@@ -86,7 +119,6 @@ textarea {
     visibility: hidden;
     background: var(--hero-slide-bg, #f8edf1);
     transition: opacity 900ms ease, visibility 900ms ease;
-    will-change: opacity, transform;
 }
 
 .official-hero-slide:nth-child(2) { --hero-slide-bg: #edf8fc; }
@@ -99,11 +131,13 @@ textarea {
     z-index: 2;
     opacity: 1;
     visibility: visible;
+    will-change: opacity, transform;
 }
 
 .official-hero-slide.is-leaving {
     z-index: 1;
     visibility: visible;
+    will-change: opacity, transform;
 }
 
 .official-hero-slide.is-active picture {
@@ -118,6 +152,15 @@ textarea {
     object-position: center;
     transform: scale(1.018);
     transform-origin: center;
+}
+
+.official-hero-slide.is-active img {
+    animation: official-hero-breathe 5200ms ease-in-out both;
+}
+
+@keyframes official-hero-breathe {
+    from { transform: scale(1.028); }
+    to { transform: scale(1.018); }
 }
 
 .official-hero-sweep,
@@ -794,14 +837,17 @@ textarea {
 .motion-reveal {
     opacity: 0;
     clip-path: inset(0 0 12% 0);
+    transform: translateY(14px);
     transition:
         opacity 680ms ease var(--motion-delay, 0ms),
-        clip-path 760ms cubic-bezier(0.18, 0.78, 0.24, 1) var(--motion-delay, 0ms);
+        clip-path 760ms cubic-bezier(0.18, 0.78, 0.24, 1) var(--motion-delay, 0ms),
+        transform 760ms cubic-bezier(0.18, 0.78, 0.24, 1) var(--motion-delay, 0ms);
 }
 
 .motion-reveal.is-in-view {
     opacity: 1;
     clip-path: inset(0 0 0 0);
+    transform: translateY(0);
 }
 
 .memory-card a {
@@ -902,7 +948,7 @@ textarea {
     background: url("../imgs/official-site/footer-curve.png") center bottom / 100% 100% no-repeat;
 }
 
-.gacha-entry {
+.memorial-entry {
     border: 2px solid #fff;
     border-radius: 7px;
     background: var(--official-pink);
@@ -910,22 +956,37 @@ textarea {
     box-shadow: 6px 6px 0 var(--official-yellow);
 }
 
-.gacha-entry:hover,
-.gacha-entry:focus-visible {
+.memorial-entry:hover,
+.memorial-entry:focus-visible {
     border-color: #fff;
     background: var(--official-blue);
     color: #fff;
     box-shadow: 6px 6px 0 var(--official-mint);
 }
 
-.gacha-entry-mark {
+.memorial-entry-mark {
     background: #fff;
     color: var(--official-pink);
 }
 
-.gacha-entry-copy small,
-.gacha-entry-arrow {
+.memorial-entry-copy small,
+.memorial-entry-arrow {
     color: #fff8b8;
+}
+
+.memorial-entry-mark,
+.memorial-entry-arrow {
+    transition: transform 180ms ease;
+}
+
+.memorial-entry:hover .memorial-entry-mark,
+.memorial-entry:focus-visible .memorial-entry-mark {
+    transform: rotate(8deg);
+}
+
+.memorial-entry:hover .memorial-entry-arrow,
+.memorial-entry:focus-visible .memorial-entry-arrow {
+    transform: translateX(4px);
 }
 
 .source-links a {
@@ -956,6 +1017,14 @@ textarea {
             url("../imgs/op1900.jpg");
         background-position: center, center top;
         background-size: cover, auto 620px;
+    }
+
+    .hero-ambient span:nth-child(n + 4) {
+        display: none;
+    }
+
+    .hero-ambient span {
+        opacity: 0.18;
     }
 
     .official-hero-carousel {
@@ -1110,21 +1179,27 @@ textarea {
 
 @media (prefers-reduced-motion: reduce) {
     .memory-card,
-    .gacha-entry,
+    .memorial-entry,
     .offering-button {
         transition: none;
     }
 
     .official-hero-slide {
-        transition-duration: 520ms;
+        transition: none;
     }
 
     .official-hero-carousel.is-transitioning .official-hero-sweep {
-        animation-duration: 800ms;
+        animation: none;
+    }
+
+    .hero-ambient span,
+    .official-hero-slide.is-active img {
+        animation: none;
     }
 
     .motion-reveal {
         clip-path: none;
+        transform: none;
         transition: opacity 420ms ease var(--motion-delay, 0ms);
     }
 }

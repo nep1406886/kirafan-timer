@@ -122,18 +122,28 @@ def convert_one(job: dict[str, str]) -> dict[str, Any]:
         # ProcessPool boundary on Windows.  Preserve the actionable message.
         raise RuntimeError(f"{type(error).__name__}: {error}") from None
     mode = exporter.mode
+    animation_count = len(exporter.builder.document["animations"])
+    expression_count = sum(
+        1 for node in exporter.builder.document["nodes"]
+        if isinstance(node.get("extras"), dict) and node["extras"].get("facePart")
+    )
     if mode == "player":
         label = "完整蒙皮 · 5 个游戏动作 · 表情随动作并可细调"
     elif mode == "skinned":
-        label = "完整单骨架 · 默认表情"
+        label = "完整单骨架"
+        if animation_count:
+            label += f" · {animation_count} 个游戏动作"
+        if expression_count:
+            label += " · 表情可调"
     else:
         label = "完整静态网格"
     relative_file = published_output.relative_to(Path(job["site_root"])).as_posix()
     preview = {
         "file": f"{relative_file}?v={int(published_output.stat().st_mtime)}",
         "label": label,
-        "animations": mode == "player",
-        "expressions": mode == "player",
+        "animations": animation_count > 0,
+        "expressions": expression_count > 0,
+        "depthWrite": True,
     }
     if job["storage"] == "gzip":
         preview["compression"] = "gzip"
@@ -277,6 +287,16 @@ def main() -> None:
             if entry is None:
                 raise RuntimeError(f"Animation bundle missing from index: {name}")
             download(asset_url(entry), animation_dir / Path(name).name)
+    for entry in selected:
+        match = None
+        if entry["name"].startswith("model/enemy/model_en_"):
+            match = Path(entry["name"]).stem.removeprefix("model_en_")
+        if not match:
+            continue
+        animation_name = f"anim/enemy/common_en_{match}.muast"
+        animation_entry = by_name.get(animation_name)
+        if animation_entry is not None:
+            download(asset_url(animation_entry), animation_dir / Path(animation_name).name)
 
     jobs = []
     for entry in selected:

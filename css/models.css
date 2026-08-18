@@ -147,6 +147,7 @@ main { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 54
 .model-3d-actions { display: flex; gap: 7px; }
 .model-3d-actions button { padding: 6px 9px; border: 1px solid rgba(255,255,255,0.22); border-radius: 4px; background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.82); cursor: pointer; font-size: 0.68rem; }
 .model-3d-actions button:hover { border-color: rgba(244,216,137,0.64); color: #f4d889; }
+.model-3d-actions button[aria-expanded="true"] { border-color: rgba(116,214,173,0.58); color: #9be6c5; }
 .model-action-strip { display: flex; align-items: stretch; gap: 6px; padding: 8px 12px; overflow-x: auto; border-bottom: 1px solid rgba(255,255,255,0.1); background: rgba(10,8,10,0.2); scrollbar-width: none; }
 .model-action-strip > span { display: flex; align-items: center; flex: 0 0 auto; padding: 0 7px 0 2px; color: rgba(255,255,255,0.45); font-size: 0.64rem; }
 .model-action-strip button { min-width: 88px; display: grid; justify-items: start; gap: 1px; padding: 6px 9px; border: 1px solid rgba(255,255,255,0.14); border-radius: 4px; background: rgba(255,255,255,0.04); color: rgba(255,255,255,0.78); cursor: pointer; font-size: 0.68rem; text-align: left; }
@@ -166,6 +167,11 @@ main { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 54
 .model-face-controls { display: flex; flex-wrap: wrap; gap: 8px 12px; padding: 2px 14px 11px; }
 .model-face-controls label { min-width: 112px; display: grid; gap: 4px; color: rgba(255,255,255,0.48); font-size: 0.6rem; }
 .model-face-controls select { min-height: 30px; padding: 4px 24px 4px 8px; border: 1px solid rgba(255,255,255,0.16); border-radius: 4px; background: #30272c; color: #fff3f7; font: 0.68rem ui-monospace, SFMono-Regular, Consolas, monospace; }
+.model-adjust-drawer { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 12px 20px; padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.1); background: rgba(18,14,17,0.3); }
+.model-adjust-drawer[hidden] { display: none; }
+.model-adjust-drawer label { display: grid; grid-template-columns: auto minmax(90px, 1fr) 42px; align-items: center; gap: 9px; color: rgba(255,255,255,0.64); font-size: 0.66rem; }
+.model-adjust-drawer input { width: 100%; accent-color: #74d6ad; }
+.model-adjust-drawer output { color: #f4d889; font-variant-numeric: tabular-nums; text-align: right; }
 .model-3d-canvas { position: relative; height: clamp(360px, 46vh, 500px); overflow: hidden; background: radial-gradient(ellipse at 50% 44%, rgba(138,99,120,0.3), rgba(25,21,24,0.12) 46%, rgba(15,13,15,0.4)); touch-action: none; }
 .model-3d-canvas::before { content: ""; position: absolute; left: 16%; right: 16%; bottom: 10%; height: 9%; border-radius: 50%; background: rgba(0,0,0,0.22); filter: blur(14px); pointer-events: none; }
 .model-3d-canvas canvas { position: relative; z-index: 1; display: block; width: 100%; height: 100%; cursor: grab; }
@@ -211,7 +217,7 @@ main { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 54
     .models-browser { grid-template-columns: 1fr; }
     .models-list-panel { border-right: 0; border-bottom: 1px solid var(--model-line); }
     .models-browser { height: auto; }
-    .models-list { max-height: 360px; }
+    .models-list { max-height: 250px; }
     .model-detail { min-height: 520px; overflow: visible; }
 }
 
@@ -230,7 +236,10 @@ main { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 54
     .model-detail-header { flex-direction: column; }
     .model-detail-actions { justify-content: start; }
     .model-3d-toolbar { align-items: flex-start; flex-direction: column; }
-    .model-3d-canvas { height: 420px; }
+    .model-3d-actions { width: 100%; flex-wrap: wrap; }
+    .model-3d-actions button { flex: 1 1 auto; min-height: 36px; }
+    .model-adjust-drawer { grid-template-columns: 1fr; }
+    .model-3d-canvas { height: clamp(360px, 62svh, 520px); }
     .model-conversion-note { align-items: flex-start; flex-direction: column; gap: 4px; }
     .model-texture-heading { align-items: flex-start; flex-direction: column; gap: 4px; }
     .model-texture-grid { grid-template-columns: 1fr; }

@@ -26,7 +26,7 @@
 
     <link rel="stylesheet" type="text/css" href="style.css?v=20260818-2">
     <link rel="stylesheet" type="text/css" href="css/memorial.css?v=20260814-27">
-    <link rel="stylesheet" type="text/css" href="css/official-theme.css?v=20260818-1">
+    <link rel="stylesheet" type="text/css" href="css/official-theme.css?v=20260818-2">
 
     <link rel="icon" href="favicon.png">
 </head>
@@ -34,6 +34,9 @@
 <body>
     <div class="container-fluid" id="app">
         <div class="memorial-stage">
+        <div class="hero-ambient" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span><span></span>
+        </div>
         <div id="header" v-show="showHeader">
             <div class="hero-copy">
                 <img class="hero-main-logo" src="imgs/official-site/kirarafantasia-logo.svg" alt="きららファンタジア">
@@ -250,7 +253,7 @@
             </div>
         </div>
     </div>
-    <script type="text/javascript" src="app.js?v=20260814-25"></script>
+    <script type="text/javascript" src="app.js?v=20260818-26"></script>
     <script defer src="https://events.vercount.one/js" onerror="window.handleVisitorCounterError && window.handleVisitorCounterError()"></script>
     <script>
         window.kirafanGiscus = {

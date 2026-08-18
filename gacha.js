@@ -7,6 +7,7 @@
     var recordKey = "kirafan-memorial-gacha-record-v1";
     var soundKey = "kirafan-memorial-gacha-sound-v1";
     var includeOriginalKey = "kirafan-memorial-gacha-original-v1";
+    var languageKey = "kirafan-memorial-gacha-language-v1";
     var originalTitleType = data && data.meta && Number.isFinite(data.meta.originalTitleType)
         ? data.meta.originalTitleType
         : 22;
@@ -28,8 +29,8 @@
     var elementIconFiles = {
         0: "gacha/ui/ElementIconFire.png",
         1: "gacha/ui/ElementIconWater.png",
-        2: "gacha/ui/ElementIconWind.png",
-        3: "gacha/ui/ElementIconEarth.png",
+        2: "gacha/ui/ElementIconEarth.png",
+        3: "gacha/ui/ElementIconWind.png",
         4: "gacha/ui/ElementIconMoon.png",
         5: "gacha/ui/ElementIconSun.png"
     };
@@ -51,6 +52,7 @@
         pools: { 3: [], 4: [], 5: [] },
         soundEnabled: readSoundPreference(),
         includeOriginal: readIncludeOriginalPreference(),
+        language: readLanguagePreference(),
         finishSummonAnimation: null,
         roomVoice: null,
         claireCue: null,
@@ -174,6 +176,23 @@
         }
     }
 
+    function readLanguagePreference() {
+        try {
+            var language = window.localStorage.getItem(languageKey);
+            return ["zh", "ja", "en"].indexOf(language) !== -1 ? language : "zh";
+        } catch (error) {
+            return "zh";
+        }
+    }
+
+    function writeLanguagePreference() {
+        try {
+            window.localStorage.setItem(languageKey, state.language);
+        } catch (error) {
+            return;
+        }
+    }
+
     function updateSoundButton() {
         var button = byId("soundToggle");
         button.classList.toggle("is-muted", !state.soundEnabled);
@@ -281,11 +300,23 @@
     }
 
     function displayName(card) {
-        return card.nameZh || card.name;
+        if (state.language === "ja") {
+            return card.name || card.nameZh || card.nameEn;
+        }
+        if (state.language === "en") {
+            return card.nameEn || card.name || card.nameZh;
+        }
+        return card.nameZh || card.name || card.nameEn;
     }
 
     function displayTitle(card) {
-        return card.titleZh || card.title;
+        if (state.language === "ja") {
+            return card.title || card.titleZh || card.titleEn;
+        }
+        if (state.language === "en") {
+            return card.titleEn || card.title || card.titleZh;
+        }
+        return card.titleZh || card.title || card.titleEn;
     }
 
     function cardImageSources(card, options) {
@@ -1431,10 +1462,13 @@
             var haystack = normalizeSearch([
                 card.name,
                 card.nameZh,
+                card.nameEn,
                 card.character,
                 card.characterZh,
+                card.characterEn,
                 card.title,
-                card.titleZh
+                card.titleZh,
+                card.titleEn
             ].join(" "));
             return haystack.indexOf(query) !== -1;
         });
@@ -1526,7 +1560,11 @@
         }).forEach(function (title) {
             var option = document.createElement("option");
             option.value = title.id;
-            option.textContent = title.nameZh || title.name;
+            option.textContent = state.language === "ja"
+                ? title.name || title.nameZh || title.nameEn
+                : state.language === "en"
+                    ? title.nameEn || title.name || title.nameZh
+                    : title.nameZh || title.name || title.nameEn;
             select.appendChild(option);
         });
         if (Array.from(select.options).some(function (option) { return option.value === selectedValue; })) {
@@ -1543,6 +1581,7 @@
 
         updateRecordDisplay();
         updateSoundButton();
+        byId("languageFilter").value = state.language;
         rebuildActivePool();
         Promise.all([playGachaBgm(), playRoomGreeting()]).then(function (started) {
             var bgmStarted = started[0];
@@ -1663,6 +1702,16 @@
             state.catalogPage = 1;
             renderCatalog();
             byId("searchInput").focus();
+        });
+        byId("languageFilter").addEventListener("change", function (event) {
+            state.language = event.currentTarget.value;
+            writeLanguagePreference();
+            populateTitleFilter();
+            renderCatalog();
+            renderSummonHistory();
+            if (state.viewer.card) {
+                updateViewer();
+            }
         });
         ["searchInput", "titleFilter", "rarityFilter"].forEach(function (id) {
             var eventName = id === "searchInput" ? "input" : "change";

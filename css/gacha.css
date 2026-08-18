@@ -1784,11 +1784,23 @@ main {
 .viewer-avatar-frame .avatar-class {
     position: absolute;
     z-index: 4;
-    width: 18px;
-    height: 18px;
+    width: 14px;
+    height: 14px;
     display: block;
     object-fit: contain;
     pointer-events: none;
+}
+
+.draw-card-media .avatar-element,
+.draw-card-media .avatar-class {
+    width: 17px;
+    height: 17px;
+}
+
+.viewer-avatar-frame .avatar-element,
+.viewer-avatar-frame .avatar-class {
+    width: 18px;
+    height: 18px;
 }
 
 .draw-card-media .avatar-element,
@@ -1965,7 +1977,7 @@ main {
 .catalog-filters {
     padding: 18px;
     display: grid;
-    grid-template-columns: 1.5fr 1fr 0.72fr 44px;
+    grid-template-columns: 1.5fr 1fr 0.72fr 0.72fr 44px;
     align-items: end;
     gap: 12px;
     border: 1px solid var(--line);
@@ -2252,7 +2264,10 @@ body.viewer-open {
     position: relative;
     min-height: 570px;
     display: grid;
-    place-items: center;
+    grid-template-columns: 48px minmax(0, 1fr) 48px;
+    align-items: center;
+    gap: 6px;
+    padding: 0 6px;
     background:
         radial-gradient(circle at center, rgba(251, 225, 164, 0.16), transparent 46%),
         #332724;
@@ -2260,6 +2275,7 @@ body.viewer-open {
 
 .viewer-media {
     position: relative;
+    grid-column: 2;
     width: min(100%, 450px);
     aspect-ratio: 3 / 4;
     overflow: hidden;
@@ -2296,9 +2312,9 @@ body.viewer-open {
 }
 
 .viewer-arrow {
-    position: absolute;
+    position: relative;
     z-index: 3;
-    top: 50%;
+    top: auto;
     width: 42px;
     height: 54px;
     padding: 0;
@@ -2308,15 +2324,19 @@ body.viewer-open {
     color: #fff;
     cursor: pointer;
     font-size: 1.3rem;
-    transform: translateY(-50%);
+    transform: none;
 }
 
 .viewer-arrow-previous {
-    left: 8px;
+    grid-column: 1;
+    grid-row: 1;
+    left: auto;
 }
 
 .viewer-arrow-next {
-    right: 8px;
+    grid-column: 3;
+    grid-row: 1;
+    right: auto;
 }
 
 .viewer-arrow:hover:not(:disabled),
@@ -2649,6 +2669,14 @@ body.viewer-open {
 
     .viewer-stage {
         min-height: 0;
+        grid-template-columns: 38px minmax(0, 1fr) 38px;
+        gap: 4px;
+        padding-inline: 4px;
+    }
+
+    .viewer-arrow {
+        width: 38px;
+        height: 48px;
     }
 
     .viewer-media {

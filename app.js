@@ -674,6 +674,8 @@ var vm = new Vue({
         var autoplayDelay = 5200;
         var transitionTimer;
         var slideCleanupTimer;
+        var motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
+        var interactionPaused = false;
 
         if (slides.length < 2) {
             return;
@@ -759,7 +761,7 @@ var vm = new Vue({
         }
 
         function canAutoplay() {
-            return !document.hidden;
+            return !document.hidden && !motionPreference.matches && !interactionPaused;
         }
 
         function resetAutoplay() {
@@ -855,7 +857,28 @@ var vm = new Vue({
                 showSlide(activeIndex + (distance < 0 ? 1 : -1));
             }
         }, { passive: true });
+        root.addEventListener("mouseenter", function () {
+            interactionPaused = true;
+            resetAutoplay();
+        });
+        root.addEventListener("mouseleave", function () {
+            interactionPaused = false;
+            resetAutoplay();
+        });
+        root.addEventListener("focusin", function () {
+            interactionPaused = true;
+            resetAutoplay();
+        });
+        root.addEventListener("focusout", function (event) {
+            if (!root.contains(event.relatedTarget)) {
+                interactionPaused = false;
+                resetAutoplay();
+            }
+        });
         document.addEventListener("visibilitychange", resetAutoplay);
+        if (motionPreference.addEventListener) {
+            motionPreference.addEventListener("change", resetAutoplay);
+        }
 
         hydrateSlide(0).then(function () {
             hydrateSlide(1);
@@ -869,7 +892,7 @@ var vm = new Vue({
 (function () {
     function initScrollReveals() {
         var items = Array.prototype.slice.call(document.querySelectorAll(
-            ".official-roster-copy, .official-hero-carousel, .section-heading, .memory-card, .comments-frame"
+            ".official-roster-copy, .official-hero-carousel, .section-heading, .memory-card, .comments-frame, .memorial-entry"
         ));
 
         if (!items.length) {

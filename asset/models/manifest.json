@@ -2,10 +2,11 @@
   "version": 2,
   "models": {
     "model/player/model_pl_140106.muast": {
-      "file": "asset/models/model_pl_140106/model.glb.gz?v=1787024189",
+      "file": "asset/models/model_pl_140106/model.glb.gz?v=1787059126",
       "label": "完整蒙皮 · 5 个游戏动作 · 表情随动作并可细调",
       "animations": true,
       "expressions": true,
+      "depthWrite": true,
       "compression": "gzip",
       "meshopt": true
     },
@@ -26,50 +27,56 @@
       "meshopt": true
     },
     "model/player/model_pl_140105.muast": {
-      "file": "asset/models/model_pl_140105/model.glb.gz?v=1787024248",
+      "file": "asset/models/model_pl_140105/model.glb.gz?v=1787059127",
       "label": "完整蒙皮 · 5 个游戏动作 · 表情随动作并可细调",
       "animations": true,
       "expressions": true,
+      "depthWrite": true,
       "compression": "gzip",
       "meshopt": true
     },
     "model/player/model_pl_140100.muast": {
-      "file": "asset/models/model_pl_140100/model.glb.gz?v=1787024248",
+      "file": "asset/models/model_pl_140100/model.glb.gz?v=1787059127",
       "label": "完整蒙皮 · 5 个游戏动作 · 表情随动作并可细调",
       "animations": true,
       "expressions": true,
+      "depthWrite": true,
       "compression": "gzip",
       "meshopt": true
     },
     "model/player/model_pl_140101.muast": {
-      "file": "asset/models/model_pl_140101/model.glb.gz?v=1787024248",
+      "file": "asset/models/model_pl_140101/model.glb.gz?v=1787059127",
       "label": "完整蒙皮 · 5 个游戏动作 · 表情随动作并可细调",
       "animations": true,
       "expressions": true,
+      "depthWrite": true,
       "compression": "gzip",
       "meshopt": true
     },
     "model/player/model_pl_140102.muast": {
-      "file": "asset/models/model_pl_140102/model.glb.gz?v=1787024248",
+      "file": "asset/models/model_pl_140102/model.glb.gz?v=1787059128",
       "label": "完整蒙皮 · 5 个游戏动作 · 表情随动作并可细调",
       "animations": true,
       "expressions": true,
+      "depthWrite": true,
       "compression": "gzip",
       "meshopt": true
     },
     "model/player/model_pl_140103.muast": {
-      "file": "asset/models/model_pl_140103/model.glb.gz?v=1787024248",
+      "file": "asset/models/model_pl_140103/model.glb.gz?v=1787059128",
       "label": "完整蒙皮 · 5 个游戏动作 · 表情随动作并可细调",
       "animations": true,
       "expressions": true,
+      "depthWrite": true,
       "compression": "gzip",
       "meshopt": true
     },
     "model/player/model_pl_140104.muast": {
-      "file": "asset/models/model_pl_140104/model.glb.gz?v=1787024248",
+      "file": "asset/models/model_pl_140104/model.glb.gz?v=1787059129",
       "label": "完整蒙皮 · 5 个游戏动作 · 表情随动作并可细调",
       "animations": true,
       "expressions": true,
+      "depthWrite": true,
       "compression": "gzip",
       "meshopt": true
     },
@@ -1722,26 +1729,29 @@
       "meshopt": true
     },
     "model/player/model_pl_140107.muast": {
-      "file": "asset/models/model_pl_140107/model.glb.gz?v=1787024376",
+      "file": "asset/models/model_pl_140107/model.glb.gz?v=1787059129",
       "label": "完整蒙皮 · 5 个游戏动作 · 表情随动作并可细调",
       "animations": true,
       "expressions": true,
+      "depthWrite": true,
       "compression": "gzip",
       "meshopt": true
     },
     "model/player/model_pl_140108.muast": {
-      "file": "asset/models/model_pl_140108/model.glb.gz?v=1787024376",
+      "file": "asset/models/model_pl_140108/model.glb.gz?v=1787059129",
       "label": "完整蒙皮 · 5 个游戏动作 · 表情随动作并可细调",
       "animations": true,
       "expressions": true,
+      "depthWrite": true,
       "compression": "gzip",
       "meshopt": true
     },
     "model/player/model_pl_140109.muast": {
-      "file": "asset/models/model_pl_140109/model.glb.gz?v=1787024376",
+      "file": "asset/models/model_pl_140109/model.glb.gz?v=1787059130",
       "label": "完整蒙皮 · 5 个游戏动作 · 表情随动作并可细调",
       "animations": true,
       "expressions": true,
+      "depthWrite": true,
       "compression": "gzip",
       "meshopt": true
     },
@@ -14442,10 +14452,11 @@
       "meshopt": true
     },
     "model/enemy/model_en_8100.muast": {
-      "file": "asset/models/model_en_8100/model.glb.gz?v=1787024333",
-      "label": "完整单骨架 · 默认表情",
+      "file": "asset/models/model_en_8100/model.glb.gz?v=1787059130",
+      "label": "完整单骨架",
       "animations": false,
       "expressions": false,
+      "depthWrite": true,
       "compression": "gzip",
       "meshopt": true
     },
@@ -14482,10 +14493,11 @@
       "meshopt": true
     },
     "model/enemy/model_en_8200.muast": {
-      "file": "asset/models/model_en_8200/model.glb.gz?v=1787024333",
-      "label": "完整单骨架 · 默认表情",
-      "animations": false,
-      "expressions": false,
+      "file": "asset/models/model_en_8200/model.glb.gz?v=1787059131",
+      "label": "完整单骨架 · 7 个游戏动作 · 表情可调",
+      "animations": true,
+      "expressions": true,
+      "depthWrite": true,
       "compression": "gzip",
       "meshopt": true
     },

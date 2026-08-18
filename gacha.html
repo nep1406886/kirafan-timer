@@ -14,7 +14,7 @@
     <link rel="preload" href="audio/gacha/claire-five-star.mp3" as="audio" type="audio/mpeg">
     <link rel="preload" href="audio/gacha/bgm-gacha.mp3" as="audio" type="audio/mpeg">
     <link rel="preload" href="audio/gacha/bgm-summon.mp3" as="audio" type="audio/mpeg">
-    <link rel="stylesheet" href="css/gacha.css?v=20260818-4">
+    <link rel="stylesheet" href="css/gacha.css?v=20260818-5">
     <link rel="icon" href="favicon.png">
 </head>
 <body class="gacha-page">
@@ -211,6 +211,14 @@
                         <option value="3">★3</option>
                     </select>
                 </label>
+                <label>
+                    <span>名称语言</span>
+                    <select id="languageFilter" aria-label="卡片名称显示语言">
+                        <option value="zh">中文</option>
+                        <option value="ja">日本語</option>
+                        <option value="en">English</option>
+                    </select>
+                </label>
                 <button id="clearFilters" class="clear-filters" type="button" title="重置筛选" aria-label="重置筛选">↺</button>
             </form>
 
@@ -295,7 +303,7 @@
         </nav>
     </footer>
 
-    <script src="asset/gacha/cards.js?v=20260814-3"></script>
-    <script src="gacha.js?v=20260818-3"></script>
+    <script src="asset/gacha/cards.js?v=20260818-5"></script>
+    <script src="gacha.js?v=20260818-4"></script>
 </body>
 </html>
