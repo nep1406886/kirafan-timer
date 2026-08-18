@@ -436,7 +436,11 @@
 
             function selectAction(action) {
                 activeAction = action;
-                if (faceFollowsAction && modelObject) {
+                // Selecting a game action is an explicit request to show the
+                // matching in-game expression. Manual component edits remain
+                // available until the next action selection.
+                faceFollowsAction = true;
+                if (modelObject) {
                     selectFace(actionFacePresets[activeAction] || "normal", true);
                 }
                 var selectedButton = null;
@@ -490,6 +494,24 @@
                 });
             }
 
+            function resolveFacePartName(kind, requested, allowNumberedVariant) {
+                if (!requested || !faceParts[kind]) {
+                    return "";
+                }
+                if (faceParts[kind][requested]) {
+                    return requested;
+                }
+                if (!allowNumberedVariant) {
+                    return "";
+                }
+                var variantPrefix = requested + "_";
+                return Object.keys(faceParts[kind]).filter(function (name) {
+                    return name.indexOf(variantPrefix) === 0 && /^\d+$/.test(name.slice(variantPrefix.length));
+                }).sort(function (a, b) {
+                    return a.localeCompare(b, undefined, { numeric: true });
+                })[0] || "";
+            }
+
             function selectFace(presetName, automatic) {
                 faceFollowsAction = Boolean(automatic);
                 var preset = facePresets[presetName] || facePresets.normal;
@@ -497,17 +519,20 @@
                 Object.keys(faceParts).forEach(function (kind) {
                     var requested = preset[kind];
                     if (kind === "overlay") {
-                        selectedParts[kind] = requested && faceParts[kind][requested] ? requested : "";
+                        selectedParts[kind] = resolveFacePartName(kind, requested, false);
                         return;
                     }
-                    if (requested && faceParts[kind][requested]) {
-                        selectedParts[kind] = requested;
+                    var requestedPart = resolveFacePartName(kind, requested, true);
+                    if (requestedPart) {
+                        selectedParts[kind] = requestedPart;
                         return;
                     }
                     var normalPart = facePresets.normal[kind];
-                    selectedParts[kind] = faceParts[kind][normalPart]
-                        ? normalPart
-                        : (Object.keys(faceParts[kind])[0] || "");
+                    selectedParts[kind] = resolveFacePartName(kind, normalPart, true)
+                        || Object.keys(faceParts[kind]).sort(function (a, b) {
+                            return a.localeCompare(b, undefined, { numeric: true });
+                        })[0]
+                        || "";
                 });
                 applyFaceSelection(selectedParts, presetName, faceFollowsAction);
             }
@@ -645,9 +670,15 @@
                     resetModelTransform();
                     modelObject.traverse(function (child) {
                         if (child.isMesh && child.material) {
-                            child.material.transparent = true;
-                            child.material.alphaTest = 0.015;
+                            var isLayeredPlayer = Boolean(preview.expressions);
+                            // Player assets are cut-out 2.5D layers. Blending
+                            // every layer makes sleeves, shoes, and hands look
+                            // translucent; alpha testing plus the exported
+                            // renderOrder matches the game's sprite pipeline.
+                            child.material.transparent = !isLayeredPlayer;
+                            child.material.alphaTest = isLayeredPlayer ? 0.35 : 0.015;
                             child.material.depthWrite = false;
+                            child.material.depthTest = !isLayeredPlayer;
                             child.material.side = THREE.DoubleSide;
                             child.renderOrder = Number(child.userData.renderOrder || (child.geometry && child.geometry.userData.renderOrder) || 0);
                         }
@@ -720,8 +751,9 @@
                     mixer.update(delta);
                 }
                 if (faceFollowsAction && activeAction === "idle" && activeFaceSelection) {
-                    if (!blinkActive && time >= nextBlinkAt && faceParts.eye.eye_C) {
-                        var blinkSelection = Object.assign({}, activeFaceSelection, { eye: "eye_C" });
+                    var blinkEye = resolveFacePartName("eye", "eye_C", true);
+                    if (!blinkActive && time >= nextBlinkAt && blinkEye) {
+                        var blinkSelection = Object.assign({}, activeFaceSelection, { eye: blinkEye });
                         blinkActive = true;
                         blinkUntil = time + 115;
                         applyFaceSelection(blinkSelection, "", true, false);
