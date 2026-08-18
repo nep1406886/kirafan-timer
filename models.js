@@ -671,14 +671,14 @@
                     modelObject.traverse(function (child) {
                         if (child.isMesh && child.material) {
                             var isLayeredPlayer = Boolean(preview.expressions);
-                            // Player assets are cut-out 2.5D layers. Blending
-                            // every layer makes sleeves, shoes, and hands look
-                            // translucent; alpha testing plus the exported
-                            // renderOrder matches the game's sprite pipeline.
-                            child.material.transparent = !isLayeredPlayer;
-                            child.material.alphaTest = isLayeredPlayer ? 0.35 : 0.015;
-                            child.material.depthWrite = false;
-                            child.material.depthTest = !isLayeredPlayer;
+                            // The original player shader uses SrcAlpha blending
+                            // with depth writes and depth testing.  The converted
+                            // meshes stay double-sided because mirrored left/right
+                            // pieces do not share a reliable GLB winding direction.
+                            child.material.transparent = true;
+                            child.material.alphaTest = isLayeredPlayer ? 0.01 : 0.015;
+                            child.material.depthWrite = isLayeredPlayer;
+                            child.material.depthTest = true;
                             child.material.side = THREE.DoubleSide;
                             child.renderOrder = Number(child.userData.renderOrder || (child.geometry && child.geometry.userData.renderOrder) || 0);
                         }

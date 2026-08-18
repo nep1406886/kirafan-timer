@@ -304,6 +304,8 @@ class KirafanExporter:
             texture_index = self.builder.add_png(combined, f"{kind}_atlas")
             material = {
                 "name": f"kirafan_{kind}",
+                # Reflected and mirrored sprite planes do not keep a uniform
+                # winding direction after conversion, so preserve both faces.
                 "doubleSided": True,
                 "alphaMode": "BLEND",
                 "pbrMetallicRoughness": {
