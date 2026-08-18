@@ -16,10 +16,11 @@ async function fetchJson(name) {
     return response.json();
 }
 
-const [characters, namedCharacters, titles, translations, englishTranslations, assetBundles, version, translationVersion] = await Promise.all([
+const [characters, namedCharacters, titles, weapons, translations, englishTranslations, assetBundles, version, translationVersion] = await Promise.all([
     fetchJson("CharacterList"),
     fetchJson("NamedList"),
     fetchJson("TitleList"),
+    fetchJson("WeaponList"),
     fetch(`${TRANSLATION_ROOT}/zh.json`).then((response) => response.json()),
     fetch(`${TRANSLATION_ROOT}/en.json`).then((response) => response.json()),
     fetch(`${DATABASE_ROOT}/../assetBundle.json`).then((response) => response.json()),
@@ -31,6 +32,11 @@ const namedById = new Map(namedCharacters.map((item) => [item.m_NamedType, item]
 const titleById = new Map(titles.map((item) => [item.m_TitleType, item]));
 const characterById = new Map(characters.map((item) => [item.m_CharaID, item]));
 const assetNames = new Set(assetBundles.map((item) => item.name));
+const dedicatedWeaponByCharacterId = new Map(
+    weapons
+        .filter((weapon) => weapon.m_EquipableCharaID > 0 && weapon.m_EvolvedCount === 0)
+        .map((weapon) => [weapon.m_EquipableCharaID, weapon])
+);
 
 function fullIllustrationName(id) {
     return `texture/charauiresource/charaillustfull/charaillust_full_${id}.muast`;
@@ -111,6 +117,9 @@ const cards = characters
         if (!title) {
             throw new Error(`Missing title ${named.m_TitleType} for card ${card.m_CharaID}`);
         }
+        const dedicatedWeapon = dedicatedWeaponByCharacterId.get(hasEvolution ? evolved.m_CharaID : card.m_CharaID)
+            || dedicatedWeaponByCharacterId.get(card.m_CharaID)
+            || null;
         return {
             id: card.m_CharaID,
             name: card.m_Name,
@@ -125,9 +134,21 @@ const cards = characters
             titleId: named.m_TitleType,
             namedType: card.m_NamedType,
             resourceId: card.m_ResourceID,
+            headId: card.m_HeadID,
+            dedicatedAnimType: card.m_DedicatedAnimType,
+            displayScale: card.m_DispScale,
             rarity: card.m_Rare + 1,
             evolvedId: hasEvolution ? evolved.m_CharaID : null,
             evolvedResourceId: hasEvolution ? evolved.m_ResourceID : null,
+            evolvedHeadId: hasEvolution ? evolved.m_HeadID : null,
+            evolvedDedicatedAnimType: hasEvolution ? evolved.m_DedicatedAnimType : null,
+            dedicatedWeapon: dedicatedWeapon ? {
+                id: dedicatedWeapon.m_ID,
+                name: dedicatedWeapon.m_WeaponName,
+                resourceIdL: dedicatedWeapon.m_ResourceID_L > 0 ? dedicatedWeapon.m_ResourceID_L : null,
+                resourceIdR: dedicatedWeapon.m_ResourceID_R > 0 ? dedicatedWeapon.m_ResourceID_R : null,
+                classAnimType: dedicatedWeapon.m_ClassAnimType
+            } : null,
             hasFullIllustration: assetNames.has(fullIllustrationName(card.m_CharaID)),
             evolvedHasFullIllustration: hasEvolution && assetNames.has(fullIllustrationName(evolved.m_CharaID)),
             class: card.m_Class,
@@ -184,6 +205,7 @@ const payload = {
             "https://database.kirafan.cn/database/CharacterList.json",
             "https://database.kirafan.cn/database/NamedList.json",
             "https://database.kirafan.cn/database/TitleList.json",
+            "https://database.kirafan.cn/database/WeaponList.json",
             "https://database.kirafan.cn/assetBundle.json",
             "https://trans.kirafan.cn/zh.json",
             "https://trans.kirafan.cn/en.json"

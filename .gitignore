@@ -2,3 +2,4 @@ test.html
 .idea
 .codex-tmp/
 __pycache__/
+asset/models/class-actions/*/actions.glb.gz

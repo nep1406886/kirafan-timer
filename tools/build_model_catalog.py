@@ -10,6 +10,8 @@ import os
 import shutil
 import subprocess
 import tempfile
+import urllib.error
+import urllib.parse
 import urllib.request
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
@@ -37,7 +39,14 @@ def download(url: str, destination: Path) -> Path:
         return destination
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".part")
-    with open_url(url) as response, temporary.open("wb") as handle:
+    try:
+        response = open_url(url)
+    except urllib.error.HTTPError as error:
+        if error.code != 404 or "-asset.kirafan.cn/" not in url:
+            raise
+        path = urllib.parse.urlsplit(url).path.lstrip("/")
+        response = open_url(f"https://asset.kirafan.cn/{path}")
+    with response, temporary.open("wb") as handle:
         while chunk := response.read(1024 * 1024):
             handle.write(chunk)
     temporary.replace(destination)

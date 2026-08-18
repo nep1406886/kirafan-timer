@@ -181,11 +181,24 @@ class KirafanExporter:
         "kirarajump_0": ("common_battle_body.muast", "common_battle_head_0.muast"),
         "win_st_0": ("common_battle_body.muast", "common_battle_head_0.muast"),
     }
+    CLASS_ACTIONS = ("idle", "attack", "class_skill_1", "class_skill_2", "class_skill_3")
 
-    def __init__(self, model_bundle: Path, animation_dir: Path) -> None:
+    def __init__(
+        self,
+        model_bundle: Path,
+        animation_dir: Path,
+        class_animation_bundle: Path | None = None,
+        class_head_animation_bundle: Path | None = None,
+        include_common_animations: bool = True,
+        animation_only: bool = False,
+    ) -> None:
         self.model_bundle = model_bundle
         self.environment = UnityPy.load(str(model_bundle))
         self.animation_dir = animation_dir
+        self.class_animation_bundle = class_animation_bundle
+        self.class_head_animation_bundle = class_head_animation_bundle
+        self.include_common_animations = include_common_animations
+        self.animation_only = animation_only
         self.builder = GlbBuilder()
         self.transforms = {
             item.path_id: item.read() for item in self.environment.objects if item.type.name == "Transform"
@@ -387,7 +400,7 @@ class KirafanExporter:
             return {"kind": "eyebrow", "name": part}
         if part.startswith("mouth_"):
             return {"kind": "mouth", "name": part}
-        if part == "cry" or part.startswith("tere_"):
+        if part == "cry" or part.startswith(("tere_", "cheeck_", "sen_", "shade", "shadow")):
             return {"kind": "overlay", "name": part}
         return None
 
@@ -548,13 +561,38 @@ class KirafanExporter:
             node["extras"]["facePart"] = face_part
 
     def load_clips(self, bundle_name: str) -> dict[str, dict[str, Any]]:
-        environment = UnityPy.load(str(self.animation_dir / bundle_name))
+        return self.load_clips_from_path(self.animation_dir / bundle_name)
+
+    @staticmethod
+    def load_clips_from_path(bundle: Path) -> dict[str, dict[str, Any]]:
+        environment = UnityPy.load(str(bundle))
         result = {}
         for item in environment.objects:
             if item.type.name == "AnimationClip":
                 tree = item.read_typetree()
                 result[tree["m_Name"].split("@", 1)[-1]] = tree
         return result
+
+    def add_class_animations(self) -> None:
+        if not self.class_animation_bundle or not self.class_animation_bundle.is_file():
+            return
+        body_clips = self.load_clips_from_path(self.class_animation_bundle)
+        head_clips = (
+            self.load_clips_from_path(self.class_head_animation_bundle)
+            if self.class_head_animation_bundle and self.class_head_animation_bundle.is_file()
+            else {}
+        )
+        for action in self.CLASS_ACTIONS:
+            body_clip = body_clips.get(action)
+            if not body_clip:
+                continue
+            animation = {"name": action, "samplers": [], "channels": []}
+            self.add_clip_channels(animation, body_clip, "body")
+            head_clip = head_clips.get(action)
+            if head_clip:
+                self.add_clip_channels(animation, head_clip, "head")
+            if animation["channels"]:
+                self.builder.document["animations"].append(animation)
 
     def add_animations(self) -> None:
         cache: dict[str, dict[str, dict[str, Any]]] = {}
@@ -620,9 +658,12 @@ class KirafanExporter:
             # Using the source material map preserves the opaque outline atlas
             # used by hands and shoes instead of forcing every renderer through
             # the body alpha atlas.
-            materials = self.add_generic_materials()
-            self.add_meshes(materials)
-            self.add_animations()
+            if not self.animation_only:
+                materials = self.add_generic_materials()
+                self.add_meshes(materials)
+            if self.include_common_animations:
+                self.add_animations()
+            self.add_class_animations()
         else:
             materials = self.add_generic_materials()
             self.add_generic_meshes(materials)
@@ -640,12 +681,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("model_bundle", type=Path)
     parser.add_argument("animation_dir", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--class-animation-bundle", type=Path)
+    parser.add_argument("--class-head-animation-bundle", type=Path)
+    parser.add_argument("--class-actions-only", action="store_true")
+    parser.add_argument("--animation-only", action="store_true")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    exporter = KirafanExporter(args.model_bundle, args.animation_dir)
+    exporter = KirafanExporter(
+        args.model_bundle,
+        args.animation_dir,
+        args.class_animation_bundle,
+        args.class_head_animation_bundle,
+        not args.class_actions_only,
+        args.animation_only,
+    )
     exporter.export(args.output)
 
 

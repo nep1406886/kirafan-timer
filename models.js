@@ -2,11 +2,12 @@
     "use strict";
 
     var DATABASE_URL = "https://database.kirafan.cn/assetBundle.json";
-    var MODEL_MANIFEST_URL = "asset/models/manifest.json?v=20260818-5";
+    var MODEL_MANIFEST_URL = "asset/models/manifest.json?v=20260819-2";
     var ASSET_HOST = "https://asset.kirafan.cn/";
     var INDEX_PAGE_SIZE = 30;
     var MODEL_PATH = /^model\/(player|enemy|weapon|shadow)\//;
     var MODEL_PREVIEWS = {};
+    var CLASS_ACTION_PREVIEWS = {};
     var PLAYER_MODEL_META = {};
     var MODEL_TITLES = [];
     var manifestState = { loaded: false, error: false };
@@ -72,7 +73,19 @@
         }
         MODEL_TITLES = data.titles.slice();
         data.cards.forEach(function (card) {
-            [card.resourceId, card.evolvedResourceId].forEach(function (resourceId) {
+            [
+                {
+                    resourceId: card.resourceId,
+                    headId: card.headId,
+                    dedicatedAnimType: card.dedicatedAnimType
+                },
+                {
+                    resourceId: card.evolvedResourceId,
+                    headId: card.evolvedHeadId,
+                    dedicatedAnimType: card.evolvedDedicatedAnimType
+                }
+            ].forEach(function (form) {
+                var resourceId = form.resourceId;
                 if (!Number.isFinite(resourceId)) {
                     return;
                 }
@@ -82,7 +95,10 @@
                     titleZh: card.titleZh,
                     character: card.character,
                     characterZh: card.characterZh,
-                    class: card.class
+                    class: card.class,
+                    headId: form.headId,
+                    dedicatedAnimType: form.dedicatedAnimType,
+                    dedicatedWeapon: card.dedicatedWeapon || null
                 };
             });
         });
@@ -291,20 +307,31 @@
         var spriteCount = spriteNames.length;
         var preview = MODEL_PREVIEWS[model.name];
         var metadata = modelMetadata(model);
-        var actionMarkup = preview && preview.animations
-            ? "<div id='modelActionStrip' class='model-action-strip' role='group' aria-label='游戏动作'><span>动作</span></div>"
+        var hasPlayerActions = Boolean(preview && (preview.animations || metadata));
+        var actionMarkup = hasPlayerActions
+            ? "<section class='model-control-section'><div class='model-control-heading'><strong>动作</strong><small>官方 AnimationClip</small></div><div id='modelActionStrip' class='model-action-strip' role='group' aria-label='游戏动作'></div></section>"
             : "";
         var faceMarkup = preview
-            ? "<div id='modelFaceInterface'" + (preview.expressions ? "" : " hidden") + "><div class='model-face-strip' role='group' aria-label='表情预设'><span>表情</span><button class='is-active' type='button' id='modelFaceAuto' aria-pressed='true'>跟随动作</button><button type='button' data-face-preset='normal' aria-pressed='false'>通常</button><button type='button' data-face-preset='smile' aria-pressed='false'>微笑</button><button type='button' data-face-preset='happy' aria-pressed='false'>开心</button><button type='button' data-face-preset='angry' aria-pressed='false'>生气</button><button type='button' data-face-preset='sad' aria-pressed='false'>难过</button><button type='button' data-face-preset='surprised' aria-pressed='false'>惊讶</button></div><details class='model-face-advanced' id='modelFaceAdvanced'><summary>展开全部表情组件</summary><div id='modelFaceControls' class='model-face-controls'></div></details></div>"
+            ? "<section class='model-control-section' id='modelFaceInterface'" + (preview.expressions ? "" : " hidden") + "><div class='model-control-heading'><strong>表情</strong><small>状态层默认关闭</small></div><div class='model-face-strip' role='group' aria-label='表情预设'><button class='is-active' type='button' id='modelFaceAuto' aria-pressed='true'>跟随动作</button><button type='button' data-face-preset='normal' aria-pressed='false'>通常</button><button type='button' data-face-preset='smile' aria-pressed='false'>微笑</button><button type='button' data-face-preset='happy' aria-pressed='false'>开心</button><button type='button' data-face-preset='angry' aria-pressed='false'>生气</button><button type='button' data-face-preset='sad' aria-pressed='false'>难过</button><button type='button' data-face-preset='surprised' aria-pressed='false'>惊讶</button><button type='button' data-face-preset='abnormal' aria-pressed='false'>异常状态</button></div><details class='model-face-advanced' id='modelFaceAdvanced'><summary>表情组件</summary><div id='modelFaceControls' class='model-face-controls'></div></details></section>"
             : "";
         var unavailableMarkup = manifestState.error
             ? "<div class='model-conversion-note'><strong>WebGL 模型清单未能载入</strong><span>纹理索引正常；请刷新页面，或检查部署中是否包含 asset/models/manifest.json。</span></div>"
             : "<div class='model-conversion-note'><strong>该条目的原始模型包当前不可用</strong><span>源素材索引仍保留条目，但转换时无法取得 Unity 包；透明纹理仍可正常查看。</span></div>";
+        var dedicatedWeapon = metadata && metadata.dedicatedWeapon;
+        var dedicatedResources = dedicatedWeapon
+            ? [dedicatedWeapon.resourceIdL, dedicatedWeapon.resourceIdR].filter(Number.isFinite)
+            : [];
+        var dedicatedAvailable = dedicatedResources.some(function (resourceId) {
+            return Boolean(MODEL_PREVIEWS["model/weapon/wpn_" + resourceId + ".muast"]);
+        });
+        var weaponMarkup = metadata
+            ? "<section class='model-control-section' id='modelWeaponInterface' data-default-mode='" + (dedicatedAvailable ? "dedicated" : "default") + "'><div class='model-control-heading'><strong>装备</strong><small id='modelWeaponStatus'>" + (dedicatedAvailable ? escapeHtml(dedicatedWeapon.name) : "职业默认武器") + "</small></div><div class='model-weapon-options' role='group' aria-label='武器显示'><button type='button' data-weapon-mode='none' aria-pressed='false'>不持有</button><button type='button' data-weapon-mode='default' aria-pressed='" + String(!dedicatedAvailable) + "' class='" + (dedicatedAvailable ? "" : "is-active") + "'>职业武器</button>" + (dedicatedAvailable ? "<button type='button' data-weapon-mode='dedicated' class='is-active' aria-pressed='true'>专用武器</button>" : "") + "</div></section>"
+            : "";
         var adjustMarkup = preview
-            ? "<div class='model-adjust-drawer' id='modelAdjustDrawer' hidden><label>模型大小 <input id='modelScaleRange' type='range' min='60' max='160' value='100' step='1'><output id='modelScaleValue'>100%</output></label><label>上下位置 <input id='modelVerticalRange' type='range' min='-50' max='50' value='0' step='1'><output id='modelVerticalValue'>0</output></label></div>"
+            ? "<section class='model-control-section model-view-controls'><div class='model-control-heading'><strong>构图</strong><small>画布视图</small></div><div class='model-adjust-drawer' id='modelAdjustDrawer'><label><span>模型大小</span><input id='modelScaleRange' type='range' min='60' max='160' value='100' step='1'><output id='modelScaleValue'>100%</output></label><label><span>上下位置</span><input id='modelVerticalRange' type='range' min='-50' max='50' value='0' step='1'><output id='modelVerticalValue'>0</output></label></div></section>"
             : "";
         var previewMarkup = preview
-            ? "<section class='model-3d-card' aria-label='游戏模型预览'><div class='model-3d-toolbar'><div><span class='model-live-badge'><i aria-hidden='true'></i>LIVE WEBGL</span><strong>游戏模型预览</strong><small>" + escapeHtml(preview.label) + "</small></div><div class='model-3d-actions'>" + (preview.animations ? "<button id='modelMotionToggle' type='button' aria-pressed='true'>暂停动作</button>" : "") + "<button id='modelAdjustToggle' type='button' aria-expanded='false'>视图调整</button><button id='modelViewReset' type='button'>重置视角</button></div></div>" + actionMarkup + faceMarkup + adjustMarkup + "<div id='model3dCanvas' class='model-3d-canvas'><div class='model-3d-loading'><span class='model-spinner' aria-hidden='true'></span><p>正在读取模型数据……</p></div></div><p class='model-3d-help'>拖动旋转 · 右键或双指移动 · 滚轮缩放 · 模型按游戏原始层级叠放" + (preview.animations ? " · 动作直接播放 AnimationClip" : "") + "</p></section>"
+            ? "<section class='model-3d-card' aria-label='游戏模型预览'><div class='model-3d-toolbar'><div><span class='model-live-badge'><i aria-hidden='true'></i>LIVE WEBGL</span><strong>模型观察台</strong><small>" + escapeHtml(preview.label) + "</small></div><div class='model-3d-actions'>" + (hasPlayerActions ? "<button id='modelMotionToggle' type='button' aria-pressed='true' title='暂停或恢复动作'><span aria-hidden='true'>Ⅱ</span> 动作</button>" : "") + "<button id='modelViewReset' type='button' title='恢复模型位置和镜头'><span aria-hidden='true'>↺</span> 重置</button></div></div><div class='model-viewer-layout'><div class='model-viewer-stage'><div id='model3dCanvas' class='model-3d-canvas'><div class='model-3d-loading'><span class='model-spinner' aria-hidden='true'></span><p>正在读取模型数据……</p></div></div></div><aside class='model-viewer-inspector' aria-label='模型控制台'>" + weaponMarkup + actionMarkup + faceMarkup + adjustMarkup + "</aside></div></section>"
             : unavailableMarkup;
         var identityMarkup = metadata
             ? "<span>作品 <strong>" + escapeHtml(bilingualLabel(metadata.titleZh, metadata.title)) + "</strong></span><span>角色 <strong>" + escapeHtml(bilingualLabel(metadata.characterZh, metadata.character)) + "</strong></span>"
@@ -339,6 +366,9 @@
         var faceControls = document.getElementById("modelFaceControls");
         var faceInterface = document.getElementById("modelFaceInterface");
         var faceAutoButton = document.getElementById("modelFaceAuto");
+        var weaponInterface = document.getElementById("modelWeaponInterface");
+        var weaponStatus = document.getElementById("modelWeaponStatus");
+        var weaponButtons = Array.prototype.slice.call(document.querySelectorAll("[data-weapon-mode]"));
         var actionButtons = [];
         var faceButtons = Array.prototype.slice.call(document.querySelectorAll("[data-face-preset]"));
         if (!host || !resetButton) {
@@ -379,6 +409,8 @@
             var animationFrame = 0;
             var previousFrame = window.performance.now();
             var objectUrls = [];
+            var mountedWeaponParts = [];
+            var weaponRequest = 0;
             var homeView = null;
             var modelHeight = 1;
             var baseRotationZ = 0;
@@ -389,17 +421,17 @@
             var facePresets = {
                 normal: { eye: "eye_A_1", eyebrow: "eyebrrow_A", mouth: "mouth_A", overlay: "" },
                 smile: { eye: "eye_A_1", eyebrow: "eyebrrow_A", mouth: "mouth_B", overlay: "" },
-                happy: { eye: "eye_C", eyebrow: "eyebrrow_B", mouth: "mouth_F", overlay: "tere_A" },
+                happy: { eye: "eye_C", eyebrow: "eyebrrow_B", mouth: "mouth_F", overlay: "" },
                 angry: { eye: "eye_I", eyebrow: "eyebrrow_E", mouth: "mouth_I", overlay: "" },
-                sad: { eye: "eye_H", eyebrow: "eyebrrow_D", mouth: "mouth_H", overlay: "cry" },
-                surprised: { eye: "eye_D", eyebrow: "eyebrrow_D_2", mouth: "mouth_D", overlay: "" }
+                sad: { eye: "eye_H", eyebrow: "eyebrrow_D", mouth: "mouth_H", overlay: "" },
+                surprised: { eye: "eye_D", eyebrow: "eyebrrow_D_2", mouth: "mouth_D", overlay: "" },
+                abnormal: { eye: "eye_H", eyebrow: "eyebrrow_D", mouth: "mouth_H", overlay: "sen_1" }
             };
             var actionFacePresets = {
                 idle: "normal",
-                run: "angry",
                 damage: "sad",
-                jump: "surprised",
-                win: "happy"
+                abnormal: "abnormal",
+                dead: "abnormal"
             };
 
             renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -461,6 +493,10 @@
                 return {
                     room_idle_L: "待机",
                     idle: "待机",
+                    attack: "普通攻击",
+                    class_skill_1: "职业技能 1",
+                    class_skill_2: "职业技能 2",
+                    class_skill_3: "职业技能 3",
                     battle_run: "战斗跑动",
                     damage: "受击",
                     kirarajump_0: "跳跃",
@@ -479,7 +515,12 @@
                 }
                 actionStrip.querySelectorAll("button").forEach(function (button) { button.remove(); });
                 actionButtons = [];
-                clips.forEach(function (clip, index) {
+                var actionOrder = ["idle", "attack", "class_skill_1", "class_skill_2", "class_skill_3", "battle_run", "damage", "kirarajump_0", "win_st_0", "abnormal", "dead", "room_idle_L"];
+                clips.slice().sort(function (left, right) {
+                    var leftIndex = actionOrder.indexOf(left.name);
+                    var rightIndex = actionOrder.indexOf(right.name);
+                    return (leftIndex < 0 ? actionOrder.length : leftIndex) - (rightIndex < 0 ? actionOrder.length : rightIndex);
+                }).forEach(function (clip, index) {
                     var button = document.createElement("button");
                     button.type = "button";
                     button.dataset.modelAction = clip.name;
@@ -727,53 +768,207 @@
                 });
             }
 
-            function defaultWeaponPreview() {
-                if (!metadata || !Number.isFinite(metadata.class)) {
-                    return null;
-                }
-                var weaponId = String(1000 + metadata.class * 100);
-                return MODEL_PREVIEWS["model/weapon/wpn_" + weaponId + ".muast"] || null;
+            function disposeObjectResources(object) {
+                var materials = new Set();
+                var textures = new Set();
+                object.traverse(function (child) {
+                    if (child.geometry) {
+                        child.geometry.dispose();
+                    }
+                    (Array.isArray(child.material) ? child.material : [child.material]).forEach(function (material) {
+                        if (!material || materials.has(material)) {
+                            return;
+                        }
+                        materials.add(material);
+                        Object.keys(material).forEach(function (key) {
+                            var value = material[key];
+                            if (value && value.isTexture && !textures.has(value)) {
+                                textures.add(value);
+                                value.dispose();
+                            }
+                        });
+                        material.dispose();
+                    });
+                });
             }
 
-            function attachDefaultWeapon(loader) {
-                var weaponPreview = defaultWeaponPreview();
-                if (!weaponPreview || !modelObject) {
+            function clearMountedWeapon() {
+                mountedWeaponParts.forEach(function (part) {
+                    if (part.parent) {
+                        part.parent.remove(part);
+                    }
+                    disposeObjectResources(part);
+                });
+                mountedWeaponParts = [];
+            }
+
+            function weaponDescriptors(mode) {
+                if (!metadata || mode === "none") {
+                    return [];
+                }
+                var resourceIds = [];
+                if (mode === "dedicated" && metadata.dedicatedWeapon) {
+                    resourceIds = [metadata.dedicatedWeapon.resourceIdL, metadata.dedicatedWeapon.resourceIdR];
+                } else if (Number.isFinite(metadata.class)) {
+                    resourceIds = [1000 + metadata.class * 100];
+                }
+                return resourceIds.filter(Number.isFinite).filter(function (resourceId, index, items) {
+                    return items.indexOf(resourceId) === index;
+                }).map(function (resourceId) {
+                    return MODEL_PREVIEWS["model/weapon/wpn_" + resourceId + ".muast"] || null;
+                }).filter(Boolean);
+            }
+
+            function updateWeaponControls(mode, loading) {
+                weaponButtons.forEach(function (button) {
+                    var active = button.dataset.weaponMode === mode;
+                    button.classList.toggle("is-active", active);
+                    button.setAttribute("aria-pressed", String(active));
+                    button.disabled = Boolean(loading);
+                });
+                if (!weaponStatus) {
+                    return;
+                }
+                if (loading) {
+                    weaponStatus.textContent = "正在装载……";
+                } else if (mode === "none") {
+                    weaponStatus.textContent = "当前不显示武器";
+                } else if (mode === "dedicated" && metadata && metadata.dedicatedWeapon) {
+                    weaponStatus.textContent = metadata.dedicatedWeapon.name;
+                } else {
+                    weaponStatus.textContent = "职业默认武器";
+                }
+            }
+
+            function attachWeaponMode(loader, mode) {
+                var request = ++weaponRequest;
+                var descriptors = weaponDescriptors(mode);
+                clearMountedWeapon();
+                updateWeaponControls(mode, descriptors.length > 0);
+                if (descriptors.length === 0 || !modelObject) {
+                    updateWeaponControls(mode, false);
+                    if (modelObject) {
+                        modelObject.updateMatrixWorld(true);
+                        fitModelView();
+                    }
                     return Promise.resolve();
                 }
-                return cacheModel(weaponPreview.file, weaponPreview.compression).then(function (sourceUrl) {
-                    return new Promise(function (resolve) {
-                        loader.load(sourceUrl, function (weaponGltf) {
-                            var parts = [];
-                            weaponGltf.scene.children.slice().forEach(function (child) {
-                                if (/_[LR]$/i.test(child.name)) {
-                                    parts.push(child);
-                                }
-                            });
-                            parts.forEach(function (part) {
-                                var side = /_L$/i.test(part.name) ? "L" : "R";
-                                var socket = modelObject.getObjectByName("Loc_" + side)
-                                    || modelObject.getObjectByName("Weapon_" + side);
-                                if (!socket) {
+                return Promise.all(descriptors.map(function (weaponPreview) {
+                    return cacheModel(weaponPreview.file, weaponPreview.compression).then(function (sourceUrl) {
+                        return new Promise(function (resolve) {
+                            loader.load(sourceUrl, function (weaponGltf) {
+                                if (disposed || request !== weaponRequest) {
+                                    disposeObjectResources(weaponGltf.scene);
+                                    resolve();
                                     return;
                                 }
-                                socket.add(part);
-                                part.position.set(0, 0, 0);
-                                part.rotation.set(0, 0, 0);
-                                part.scale.setScalar(1);
-                                part.traverse(function (child) {
-                                    if (child.isMesh && child.material) {
-                                        child.material.transparent = true;
-                                        child.material.alphaTest = 0.015;
-                                        child.material.depthWrite = true;
-                                        child.material.depthTest = true;
-                                        child.material.side = THREE.DoubleSide;
+                                weaponGltf.scene.children.slice().forEach(function (part) {
+                                    if (!/_[LR]$/i.test(part.name)) {
+                                        return;
+                                    }
+                                    var side = /_L$/i.test(part.name) ? "L" : "R";
+                                    var socket = modelObject.getObjectByName("Loc_" + side)
+                                        || modelObject.getObjectByName("Weapon_" + side);
+                                    if (!socket) {
+                                        return;
+                                    }
+                                    socket.add(part);
+                                    part.position.set(0, 0, 0);
+                                    part.rotation.set(0, 0, 0);
+                                    part.scale.setScalar(1);
+                                    part.traverse(function (child) {
+                                        if (child.isMesh && child.material) {
+                                            child.material.transparent = true;
+                                            child.material.alphaTest = 0.015;
+                                            child.material.depthWrite = true;
+                                            child.material.depthTest = true;
+                                            child.material.side = THREE.DoubleSide;
+                                        }
+                                    });
+                                    mountedWeaponParts.push(part);
+                                });
+                                resolve();
+                            }, undefined, resolve);
+                        });
+                    });
+                })).then(function () {
+                    if (request === weaponRequest) {
+                        updateWeaponControls(mode, false);
+                        modelObject.updateMatrixWorld(true);
+                        fitModelView();
+                    }
+                }).catch(function () {
+                    if (request === weaponRequest) {
+                        updateWeaponControls(mode, false);
+                    }
+                });
+            }
+
+            function loadClassActionClips(loader) {
+                if (!metadata || !Number.isFinite(metadata.class)) {
+                    return Promise.resolve([]);
+                }
+                var headId = Number.isFinite(metadata.headId) ? metadata.headId : 0;
+                var source = CLASS_ACTION_PREVIEWS[String(metadata.class) + ":" + headId]
+                    || CLASS_ACTION_PREVIEWS[String(metadata.class) + ":0"];
+                if (!source) {
+                    return Promise.resolve([]);
+                }
+                return cacheModel(source.file, source.compression).then(function (sourceUrl) {
+                    return new Promise(function (resolve) {
+                        loader.load(sourceUrl, function (actionGltf) {
+                            try {
+                                function stableNodePath(node) {
+                                    var names = [];
+                                    var current = node;
+                                    while (current && current !== actionGltf.scene && current !== modelObject) {
+                                        var originalName = current.userData.name || current.name;
+                                        if (originalName) {
+                                            names.unshift(originalName);
+                                        }
+                                        if (originalName === "root" || originalName === "Head_root") {
+                                            break;
+                                        }
+                                        current = current.parent;
+                                    }
+                                    return names.join("/");
+                                }
+
+                                var currentNodesByPath = {};
+                                modelObject.traverse(function (node) {
+                                    var path = stableNodePath(node);
+                                    if (path && (path.indexOf("root") === 0 || path.indexOf("Head_root") === 0)) {
+                                        currentNodesByPath[path] = node;
                                     }
                                 });
-                            });
-                            resolve();
-                        }, undefined, resolve);
+                                var clips = actionGltf.animations.map(function (clip) {
+                                    var tracks = clip.tracks.map(function (track) {
+                                        var separator = track.name.lastIndexOf(".");
+                                        var sourceName = separator >= 0 ? track.name.slice(0, separator) : track.name;
+                                        var property = separator >= 0 ? track.name.slice(separator) : "";
+                                        // Follow GLTFLoader's node lookup semantics so its sanitized,
+                                        // unique track names resolve to the same source nodes here.
+                                        var sourceNode = THREE.PropertyBinding.findNode(actionGltf.scene, sourceName);
+                                        var targetNode = sourceNode && currentNodesByPath[stableNodePath(sourceNode)];
+                                        if (!targetNode) {
+                                            return null;
+                                        }
+                                        var retargeted = track.clone();
+                                        retargeted.name = targetNode.uuid + property;
+                                        return retargeted;
+                                    }).filter(Boolean);
+                                    return new THREE.AnimationClip(clip.name, clip.duration, tracks);
+                                }).filter(function (clip) { return clip.tracks.length > 0; });
+                                resolve(clips);
+                            } catch (error) {
+                                console.warn("职业动作载入失败", error);
+                                resolve([]);
+                            } finally {
+                                disposeObjectResources(actionGltf.scene);
+                            }
+                        }, undefined, function () { resolve([]); });
                     });
-                }).catch(function () { return; });
+                }).catch(function () { return []; });
             }
 
             cacheModel(preview.file, preview.compression).then(function (sourceUrl) {
@@ -800,7 +995,7 @@
                                 child.userData.facePart = { kind: "eyebrow", name: partName };
                             } else if (/^mouth_/.test(partName)) {
                                 child.userData.facePart = { kind: "mouth", name: partName };
-                            } else if (partName === "cry" || /^tere_/.test(partName)) {
+                            } else if (partName === "cry" || /^(tere_|cheeck_|sen_|shade|shadow)/.test(partName)) {
                                 child.userData.facePart = { kind: "overlay", name: partName };
                             }
                         }
@@ -828,24 +1023,55 @@
                     });
                     scene.add(modelObject);
                     mixer = new THREE.AnimationMixer(modelObject);
+                    mountFaceControls();
+                    // Face overlays are exported visible in some source bundles.
+                    // Apply the normal preset before the asynchronous class action
+                    // download so shade/debuff layers never flash during loading.
+                    selectFace("normal", true);
                     gltf.animations.forEach(function (clip) {
                         clipByName[clip.name] = clip;
                     });
                     mountActionControls(gltf.animations);
-                    mountFaceControls();
+                    activeAction = clipByName.room_idle_L
+                        ? "room_idle_L"
+                        : clipByName.idle
+                            ? "idle"
+                            : gltf.animations[0] && gltf.animations[0].name;
+                    if (activeAction) {
+                        selectAction(activeAction);
+                        mixer.update(0);
+                        modelObject.updateMatrixWorld(true);
+                    }
                     if (faceInterface) {
                         faceInterface.hidden = !Object.keys(faceParts).some(function (kind) {
                             return Object.keys(faceParts[kind]).length > 0;
                         });
                     }
-                    activeAction = clipByName.room_idle_L ? "room_idle_L" : clipByName.idle ? "idle" : gltf.animations[0] && gltf.animations[0].name;
-                    selectFace(actionFacePresets[activeAction] || "normal", true);
-                    if (activeAction) {
-                        selectAction(activeAction);
-                    }
-                    mixer.update(0);
-                    modelObject.updateMatrixWorld(true);
-                    attachDefaultWeapon(loader).then(function () {
+                    loadClassActionClips(loader).then(function (classClips) {
+                        var clips = [];
+                        clipByName = {};
+                        classClips.concat(gltf.animations).forEach(function (clip) {
+                            if (!clipByName[clip.name]) {
+                                clipByName[clip.name] = clip;
+                                clips.push(clip);
+                            }
+                        });
+                        mountActionControls(clips);
+                        activeAction = clipByName.idle ? "idle" : clipByName.room_idle_L ? "room_idle_L" : clips[0] && clips[0].name;
+                        selectFace(actionFacePresets[activeAction] || "normal", true);
+                        if (activeAction) {
+                            selectAction(activeAction);
+                        }
+                        mixer.update(0);
+                        modelObject.updateMatrixWorld(true);
+                        weaponButtons.forEach(function (button) {
+                            button.addEventListener("click", function () {
+                                attachWeaponMode(loader, button.dataset.weaponMode);
+                            });
+                        });
+                        var initialWeaponMode = weaponInterface ? weaponInterface.dataset.defaultMode : "none";
+                        return attachWeaponMode(loader, initialWeaponMode);
+                    }).then(function () {
                         modelObject.updateMatrixWorld(true);
                         fitModelView();
                         host.classList.add("is-ready");
@@ -870,10 +1096,10 @@
             resetButton.addEventListener("click", function () {
                 resetModelTransform();
                 resetView();
-                if (clipByName.room_idle_L) {
-                    selectAction("room_idle_L");
-                } else if (clipByName.idle) {
+                if (clipByName.idle) {
                     selectAction("idle");
+                } else if (clipByName.room_idle_L) {
+                    selectAction("room_idle_L");
                 }
             });
             if (adjustButton && adjustDrawer) {
@@ -969,6 +1195,7 @@
                     mixer.stopAllAction();
                 }
                 if (modelObject) {
+                    clearMountedWeapon();
                     var disposedMaterials = new Set();
                     var disposedTextures = new Set();
                     scene.remove(modelObject);
@@ -1118,6 +1345,9 @@
             }
             Object.keys(manifest.models).forEach(function (name) {
                 MODEL_PREVIEWS[name] = manifest.models[name];
+            });
+            Object.keys(manifest.classActions || {}).forEach(function (classId) {
+                CLASS_ACTION_PREVIEWS[classId] = manifest.classActions[classId];
             });
             manifestState.loaded = true;
         }).catch(function () {
