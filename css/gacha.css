@@ -1107,6 +1107,7 @@ body.summon-playing {
 
 .summon-history-actions {
     padding: 12px 20px 16px;
+    flex-wrap: wrap;
     border-top: 1px solid #e4cdb3;
 }
 
@@ -1119,6 +1120,16 @@ body.summon-playing {
     color: #71493d;
     cursor: pointer;
     font-weight: 700;
+}
+
+.summon-history-actions button:disabled {
+    cursor: default;
+    opacity: 0.45;
+}
+
+.summon-history-actions .history-reset-button {
+    border-color: #c77970;
+    color: #9a3d36;
 }
 
 .summon-history-actions button:last-child {

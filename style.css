@@ -296,10 +296,9 @@ main {
 
 .comments-frame {
     min-height: 132px;
-    padding: 18px;
-    border: 1px solid #e8dfe1;
-    border-radius: 4px;
-    background: #fcfaf8;
+    padding: 2px 0 0;
+    border: 0;
+    background: transparent;
 }
 
 .giscus {
@@ -325,6 +324,8 @@ main {
 
 .comments-frame .giscus-frame {
     width: 100%;
+    display: block;
+    color-scheme: light;
 }
 
 .event-group {
@@ -907,10 +908,17 @@ main {
     text-align: center;
 }
 
-.gacha-entry {
-    width: min(520px, 100%);
-    min-height: 76px;
+.memorial-entry-links {
+    width: min(1052px, 100%);
     margin: 0 auto 22px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.memorial-entry {
+    min-width: 0;
+    min-height: 76px;
     padding: 13px 18px;
     display: flex;
     align-items: center;
@@ -924,8 +932,8 @@ main {
     transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
 }
 
-.gacha-entry:hover,
-.gacha-entry:focus-visible {
+.memorial-entry:hover,
+.memorial-entry:focus-visible {
     border-color: #f0b541;
     background: #352b31;
     color: #fff;
@@ -934,7 +942,7 @@ main {
     outline: none;
 }
 
-.gacha-entry-mark {
+.memorial-entry-mark {
     width: 42px;
     height: 42px;
     flex: 0 0 42px;
@@ -946,26 +954,26 @@ main {
     font-size: 1.3rem;
 }
 
-.gacha-entry-copy {
+.memorial-entry-copy {
     min-width: 0;
     display: flex;
     flex: 1;
     flex-direction: column;
 }
 
-.gacha-entry-copy small {
+.memorial-entry-copy small {
     color: #a99ca4;
     font-size: 0.62rem;
     letter-spacing: 0.1em;
 }
 
-.gacha-entry-copy strong {
+.memorial-entry-copy strong {
     margin-top: 1px;
     font-family: "Noto Serif SC", "STSong", serif;
     font-size: 1.02rem;
 }
 
-.gacha-entry-arrow {
+.memorial-entry-arrow {
     color: #f7d783;
     font-size: 1.25rem;
 }
@@ -1179,6 +1187,10 @@ main {
         padding: 18px 12px 6px;
     }
 
+    .memorial-entry-links {
+        grid-template-columns: 1fr;
+    }
+
     .memory-section,
     .comments-section {
         margin-top: 22px;
@@ -1212,7 +1224,7 @@ main {
     }
 
     .comments-frame {
-        padding: 10px;
+        padding: 0;
     }
 
     #columns-holder > div {

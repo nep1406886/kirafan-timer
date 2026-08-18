@@ -58,6 +58,7 @@
         resultVoice: null,
         resultVoiceTimer: null,
         summonBgm: null,
+        roomGreetingPlayed: false,
         keyRendererPromise: null,
         summonInProgress: false,
         lastDrawCount: 0,
@@ -591,6 +592,10 @@
             ? "保留最近 " + history.length + " 次召唤，共 " + drawCount + " 张卡。"
             : "还没有本地抽卡历史。";
         byId("clearSummonHistory").disabled = history.length === 0;
+        byId("resetSummonRecord").disabled = state.record.total === 0
+            && state.record.fiveStars === 0
+            && state.record.owned.length === 0
+            && history.length === 0;
 
         if (history.length === 0) {
             var empty = document.createElement("p");
@@ -679,6 +684,24 @@
         }
         state.record.history = [];
         writeRecord();
+        renderSummonHistory();
+    }
+
+    function resetSummonRecord() {
+        var hasRecord = state.record.total > 0
+            || state.record.fiveStars > 0
+            || state.record.owned.length > 0
+            || state.record.history.length > 0;
+        if (!hasRecord || !window.confirm("确定重置全部召唤记录吗？抽卡历史、累计召唤、★5 次数和已遇卡片都会被清除，且无法撤销。")) {
+            return;
+        }
+        state.record = { total: 0, fiveStars: 0, owned: [], history: [] };
+        try {
+            window.localStorage.removeItem(recordKey);
+        } catch (error) {
+            // The in-memory record is still reset when localStorage is unavailable.
+        }
+        updateRecordDisplay();
         renderSummonHistory();
     }
 
@@ -772,11 +795,11 @@
 
     function playSummonBgm() {
         // 原版召唤流程中，克蕾尔台词和卡面演出共用同一段循环 BGM。
-        playSummonAudio("summonBgm", summonAudioFiles.summonBgm, 0.38, true);
+        return playSummonAudio("summonBgm", summonAudioFiles.summonBgm, 0.38, true);
     }
 
     function playGachaBgm() {
-        playSummonAudio("summonBgm", summonAudioFiles.gachaBgm, 0.28, true);
+        return playSummonAudio("summonBgm", summonAudioFiles.gachaBgm, 0.28, true);
     }
 
     function playResultVoice(isFiveStar) {
@@ -836,7 +859,12 @@
     function playRoomGreeting() {
         var greeting = roomGreetingForHour(new Date().getHours());
         byId("roomGreetingLine").textContent = greeting.text;
-        return playSummonAudio("roomVoice", greeting.source, 0.92, false);
+        return playSummonAudio("roomVoice", greeting.source, 0.92, false).then(function (started) {
+            if (started) {
+                state.roomGreetingPlayed = true;
+            }
+            return started;
+        });
     }
 
     function runSummonAnimation(results, done) {
@@ -879,7 +907,7 @@
         characterStand.hidden = true;
         byId("summonResultOverlay").hidden = true;
         document.body.classList.add("summon-playing");
-        loadGachaKeyRenderer();
+        var keyRendererReady = loadGachaKeyRenderer();
         playSummonBgm();
 
         function isActive() {
@@ -1086,6 +1114,13 @@
             var preparedIndex = 0;
 
             if (!await wait(1400)) {
+                return;
+            }
+            // Do not enter the key sequence until the official GLB is ready.
+            // The old bitmap fallback contained the room background and became
+            // bright diagonal strips when squeezed into a depth-facing pose.
+            await keyRendererReady;
+            if (!isActive()) {
                 return;
             }
             setStagePhase(cards[0], "phase-key-flight");
@@ -1335,6 +1370,7 @@
         stage.hidden = true;
         stage.setAttribute("aria-hidden", "true");
         document.body.classList.remove("summon-playing");
+        playGachaBgm();
         byId("drawTen").focus({ preventScroll: true });
     }
 
@@ -1508,12 +1544,31 @@
         updateRecordDisplay();
         updateSoundButton();
         rebuildActivePool();
-        playRoomGreeting().then(function (started) {
-            if (!started && state.soundEnabled) {
-                document.addEventListener("pointerdown", function () {
-                    playRoomGreeting();
-                }, { once: true, capture: true });
+        Promise.all([playGachaBgm(), playRoomGreeting()]).then(function (started) {
+            var bgmStarted = started[0];
+            var greetingStarted = started[1];
+            if ((bgmStarted && greetingStarted) || !state.soundEnabled) {
+                return;
             }
+
+            var unlockRoomAudio = function (event) {
+                document.removeEventListener("pointerdown", unlockRoomAudio);
+                document.removeEventListener("keydown", unlockRoomAudio);
+                var target = event.target;
+                var handlesAudioDirectly = target && target.closest
+                    && target.closest("#drawOne, #drawTen, #drawAgain, #soundToggle");
+                if (!state.soundEnabled || state.summonInProgress || handlesAudioDirectly) {
+                    return;
+                }
+                if (!bgmStarted) {
+                    playGachaBgm();
+                }
+                if (!greetingStarted && !state.roomGreetingPlayed) {
+                    playRoomGreeting();
+                }
+            };
+            document.addEventListener("pointerdown", unlockRoomAudio);
+            document.addEventListener("keydown", unlockRoomAudio);
         });
 
         byId("drawOne").addEventListener("click", function () { performSummon(1); });
@@ -1527,6 +1582,13 @@
             state.soundEnabled = !state.soundEnabled;
             if (!state.soundEnabled) {
                 stopSummonAudio();
+            } else if (state.summonInProgress) {
+                playSummonBgm();
+            } else {
+                playGachaBgm();
+                if (!state.roomGreetingPlayed) {
+                    playRoomGreeting();
+                }
             }
             writeSoundPreference();
             updateSoundButton();
@@ -1538,6 +1600,7 @@
         byId("closeSummonHistory").addEventListener("click", closeSummonHistory);
         byId("doneSummonHistory").addEventListener("click", closeSummonHistory);
         byId("clearSummonHistory").addEventListener("click", clearSummonHistory);
+        byId("resetSummonRecord").addEventListener("click", resetSummonRecord);
         byId("closeSummonResult").addEventListener("click", closeSummonResult);
         byId("skipSummon").addEventListener("click", function () {
             if (state.finishSummonAnimation) {

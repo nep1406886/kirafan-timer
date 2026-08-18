@@ -24,9 +24,9 @@
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.0/css/bootstrap.min.css" integrity="sha384-9gVQ4dYFwwWSjIDZnLEWnxCjeSWFphJiwGPXr1jddIhOegiu1FwO5qRGvFXOdJZ4" crossorigin="anonymous">
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.1.0/js/bootstrap.min.js" integrity="sha384-uefMccjFJAIv6A+rW+L4AHf99KvxDjWSu1z9VI8SKNVmz4sk7buKt/6v9KI65qnm" crossorigin="anonymous"></script>
 
-    <link rel="stylesheet" type="text/css" href="style.css?v=20260813-7">
+    <link rel="stylesheet" type="text/css" href="style.css?v=20260818-2">
     <link rel="stylesheet" type="text/css" href="css/memorial.css?v=20260814-27">
-    <link rel="stylesheet" type="text/css" href="css/official-theme.css?v=20260814-17">
+    <link rel="stylesheet" type="text/css" href="css/official-theme.css?v=20260818-1">
 
     <link rel="icon" href="favicon.png">
 </head>
@@ -201,17 +201,26 @@
         </main>
 
         <footer class="memorial-footer">
-            <a class="gacha-entry" href="gacha.html">
-                <span class="gacha-entry-mark" aria-hidden="true">✦</span>
-                <span class="gacha-entry-copy">
-                    <small>MEMORIAL CALL / 静态纪念召唤</small>
-                    <strong>前往抽卡界面</strong>
-                </span>
-                <span class="gacha-entry-arrow" aria-hidden="true">→</span>
-            </a>
+            <nav class="memorial-entry-links" aria-label="纪念页面入口">
+                <a class="memorial-entry" href="gacha.html">
+                    <span class="memorial-entry-mark" aria-hidden="true">✦</span>
+                    <span class="memorial-entry-copy">
+                        <small>MEMORIAL CALL / 高达2%的爆率</small>
+                        <strong>前往抽卡界面</strong>
+                    </span>
+                    <span class="memorial-entry-arrow" aria-hidden="true">→</span>
+                </a>
+                <a class="memorial-entry" href="models.html">
+                    <span class="memorial-entry-mark" aria-hidden="true">◇</span>
+                    <span class="memorial-entry-copy">
+                        <small>MODEL ARCHIVE / 糖比小人会动</small>
+                        <strong>前往模型观察室</strong>
+                    </span>
+                    <span class="memorial-entry-arrow" aria-hidden="true">→</span>
+                </a>
+            </nav>
             <p class="footer-note">感谢每一段在艾特瓦利亚度过的时光。</p>
             <nav class="source-links" aria-label="游戏资料来源">
-                <a href="models.html">模型素材观察室</a>
                 <a href="https://kirarafantasia.miraheze.org/wiki/Main_Page" target="_blank" rel="noopener noreferrer">Kirara Fantasia Fan-Wiki</a>
                 <a href="https://wiki.kirafan.moe" target="_blank" rel="noopener noreferrer">きらファン解析 Wiki</a>
             </nav>
@@ -255,7 +264,7 @@
             reactionsEnabled: "1",
             emitMetadata: "0",
             inputPosition: "top",
-            theme: "light",
+            theme: "https://nep1406886.github.io/kirafan-timer/css/giscus-theme.css?v=20260818-1",
             lang: "zh-CN"
         };
     </script>

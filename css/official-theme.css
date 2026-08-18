@@ -824,10 +824,11 @@ textarea {
 }
 
 .comments-frame {
-    border: 2px solid var(--official-brown);
-    border-radius: 7px;
-    background: rgba(255, 255, 255, 0.94);
-    box-shadow: 7px 7px 0 rgba(101, 206, 224, 0.32);
+    padding: clamp(12px, 2vw, 20px);
+    border: 1px solid rgba(91, 54, 45, 0.18);
+    border-radius: 14px;
+    background: rgba(255, 253, 251, 0.82);
+    box-shadow: 0 14px 34px rgba(76, 48, 59, 0.09);
 }
 
 /* Offering result adopts the same official palette. */
