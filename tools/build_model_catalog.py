@@ -5,15 +5,17 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import http.client
 import json
 import os
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +34,22 @@ HTTP_HEADERS = {"User-Agent": "kirafan-timer-model-builder/1.0"}
 
 def open_url(url: str, timeout: int = 90):
     return urllib.request.urlopen(urllib.request.Request(url, headers=HTTP_HEADERS), timeout=timeout)
+
+
+def load_asset_index(attempts: int = 5) -> list[dict[str, Any]]:
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            with open_url(DATABASE_URL) as response:
+                entries = json.loads(response.read())
+            if not isinstance(entries, list):
+                raise RuntimeError("Asset index is not a list")
+            return entries
+        except (http.client.IncompleteRead, json.JSONDecodeError, OSError) as error:
+            last_error = error
+            if attempt + 1 < attempts:
+                time.sleep(min(8, 2 ** attempt))
+    raise RuntimeError(f"Unable to read asset index after {attempts} attempts: {last_error}")
 
 
 def download(url: str, destination: Path) -> Path:
@@ -169,13 +187,20 @@ def convert_one(job: dict[str, str]) -> dict[str, Any]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kind", choices=("all", "player", "enemy", "weapon", "shadow"), default="all")
+    parser.add_argument("--name", help="Only convert the exact asset bundle name")
     parser.add_argument("--match", help="Only convert names containing this text")
     parser.add_argument("--limit", type=int, default=0, help="Maximum number of selected models; zero means all")
+    parser.add_argument(
+        "--animated-enemies-only",
+        action="store_true",
+        help="Convert only enemy models that have a matching common_en animation bundle",
+    )
     parser.add_argument("--workers", type=int, default=max(1, min(4, os.cpu_count() or 1)))
     parser.add_argument("--storage", choices=("gzip", "glb"), default="gzip")
     parser.add_argument("--site-root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--manifest", type=Path)
+    parser.add_argument("--index-file", type=Path, help="Use a previously downloaded assetBundle.json")
     parser.add_argument("--cache-dir", type=Path, default=Path(tempfile.gettempdir()) / "kirafan-model-cache")
     parser.add_argument("--gltfpack", type=Path, help="Path to gltfpack; enables lossless Meshopt publishing")
     parser.add_argument(
@@ -275,12 +300,27 @@ def main() -> None:
             raise SystemExit("--optimize-existing requires --gltfpack")
         optimize_existing_catalog(manifest_path, site_root, gltfpack, args.workers)
         return
-    with open_url(DATABASE_URL) as response:
-        entries = json.load(response)
+    if args.index_file:
+        entries = json.loads(args.index_file.read_text(encoding="utf-8"))
+        if not isinstance(entries, list):
+            raise SystemExit(f"Asset index is not a list: {args.index_file}")
+    else:
+        entries = load_asset_index()
     by_name = {entry["name"]: entry for entry in entries if isinstance(entry, dict) and "name" in entry}
 
     prefix = "model/" if args.kind == "all" else f"model/{args.kind}/"
     selected = [entry for entry in entries if str(entry.get("name", "")).startswith(prefix)]
+    if args.animated_enemies_only:
+        if args.kind != "enemy":
+            raise SystemExit("--animated-enemies-only requires --kind enemy")
+        animated_enemy_names = {
+            f"model/enemy/model_en_{Path(entry['name']).stem.removeprefix('common_en_')}.muast"
+            for entry in entries
+            if str(entry.get("name", "")).startswith("anim/enemy/common_en_")
+        }
+        selected = [entry for entry in selected if entry["name"] in animated_enemy_names]
+    if args.name:
+        selected = [entry for entry in selected if entry["name"] == args.name]
     if args.match:
         selected = [entry for entry in selected if args.match.lower() in entry["name"].lower()]
     selected.sort(key=lambda entry: entry["name"])
@@ -296,16 +336,23 @@ def main() -> None:
             if entry is None:
                 raise RuntimeError(f"Animation bundle missing from index: {name}")
             download(asset_url(entry), animation_dir / Path(name).name)
+    enemy_animation_entries = []
     for entry in selected:
-        match = None
-        if entry["name"].startswith("model/enemy/model_en_"):
-            match = Path(entry["name"]).stem.removeprefix("model_en_")
-        if not match:
+        if not entry["name"].startswith("model/enemy/model_en_"):
             continue
+        match = Path(entry["name"]).stem.removeprefix("model_en_")
         animation_name = f"anim/enemy/common_en_{match}.muast"
         animation_entry = by_name.get(animation_name)
         if animation_entry is not None:
-            download(asset_url(animation_entry), animation_dir / Path(animation_name).name)
+            enemy_animation_entries.append(animation_entry)
+    if enemy_animation_entries:
+        with ThreadPoolExecutor(max_workers=min(8, len(enemy_animation_entries))) as executor:
+            futures = [
+                executor.submit(download, asset_url(entry), animation_dir / Path(entry["name"]).name)
+                for entry in enemy_animation_entries
+            ]
+            for future in as_completed(futures):
+                future.result()
 
     jobs = []
     for entry in selected:

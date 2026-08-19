@@ -396,11 +396,11 @@ class KirafanExporter:
         part = name[4:]
         if part.startswith("eye_"):
             return {"kind": "eye", "name": part}
-        if part.startswith("eyebrrow_"):
+        if part.startswith(("eyebrow_", "eyebrrow_")):
             return {"kind": "eyebrow", "name": part}
         if part.startswith("mouth_"):
             return {"kind": "mouth", "name": part}
-        if part == "cry" or part.startswith(("tere_", "cheeck_", "sen_", "shade", "shadow")):
+        if part == "cry" or part.startswith(("tere_", "cheek_", "cheeck_", "sen_", "shade", "shadow")):
             return {"kind": "overlay", "name": part}
         return None
 

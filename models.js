@@ -2,7 +2,7 @@
     "use strict";
 
     var DATABASE_URL = "https://database.kirafan.cn/assetBundle.json";
-    var MODEL_MANIFEST_URL = "asset/models/manifest.json?v=20260819-2";
+    var MODEL_MANIFEST_URL = "asset/models/manifest.json?v=20260819-4";
     var ASSET_HOST = "https://asset.kirafan.cn/";
     var INDEX_PAGE_SIZE = 30;
     var MODEL_PATH = /^model\/(player|enemy|weapon|shadow)\//;
@@ -307,9 +307,9 @@
         var spriteCount = spriteNames.length;
         var preview = MODEL_PREVIEWS[model.name];
         var metadata = modelMetadata(model);
-        var hasPlayerActions = Boolean(preview && (preview.animations || metadata));
+        var hasPlayerActions = Boolean(preview && (preview.animations || metadata || parts.kind === "enemy"));
         var actionMarkup = hasPlayerActions
-            ? "<section class='model-control-section'><div class='model-control-heading'><strong>动作</strong><small>官方 AnimationClip</small></div><div id='modelActionStrip' class='model-action-strip' role='group' aria-label='游戏动作'></div></section>"
+            ? "<section class='model-control-section'><div class='model-control-heading'><strong>动作</strong><small>" + (parts.kind === "enemy" && !preview.animations ? "动作预览" : "官方 AnimationClip") + "</small></div><div id='modelActionStrip' class='model-action-strip' role='group' aria-label='游戏动作'></div></section>"
             : "";
         var faceMarkup = preview
             ? "<section class='model-control-section' id='modelFaceInterface'" + (preview.expressions ? "" : " hidden") + "><div class='model-control-heading'><strong>表情</strong><small>状态层默认关闭</small></div><div class='model-face-strip' role='group' aria-label='表情预设'><button class='is-active' type='button' id='modelFaceAuto' aria-pressed='true'>跟随动作</button><button type='button' data-face-preset='normal' aria-pressed='false'>通常</button><button type='button' data-face-preset='smile' aria-pressed='false'>微笑</button><button type='button' data-face-preset='happy' aria-pressed='false'>开心</button><button type='button' data-face-preset='angry' aria-pressed='false'>生气</button><button type='button' data-face-preset='sad' aria-pressed='false'>难过</button><button type='button' data-face-preset='surprised' aria-pressed='false'>惊讶</button><button type='button' data-face-preset='abnormal' aria-pressed='false'>异常状态</button></div><details class='model-face-advanced' id='modelFaceAdvanced'><summary>表情组件</summary><div id='modelFaceControls' class='model-face-controls'></div></details></section>"
@@ -416,16 +416,20 @@
             var baseRotationZ = 0;
             var lastViewportWidth = 0;
             var lastViewportHeight = 0;
+            var enemyMotionTime = 0;
+            var enemyMotionBasePosition = null;
+            var enemyMotionBaseRotation = null;
             var faceParts = { eye: {}, eyebrow: {}, mouth: {}, overlay: {} };
+            var enemyVisualParts = { eye: {}, mouth: {} };
             var faceSelects = {};
             var facePresets = {
-                normal: { eye: "eye_A_1", eyebrow: "eyebrrow_A", mouth: "mouth_A", overlay: "" },
-                smile: { eye: "eye_A_1", eyebrow: "eyebrrow_A", mouth: "mouth_B", overlay: "" },
-                happy: { eye: "eye_C", eyebrow: "eyebrrow_B", mouth: "mouth_F", overlay: "" },
-                angry: { eye: "eye_I", eyebrow: "eyebrrow_E", mouth: "mouth_I", overlay: "" },
-                sad: { eye: "eye_H", eyebrow: "eyebrrow_D", mouth: "mouth_H", overlay: "" },
-                surprised: { eye: "eye_D", eyebrow: "eyebrrow_D_2", mouth: "mouth_D", overlay: "" },
-                abnormal: { eye: "eye_H", eyebrow: "eyebrrow_D", mouth: "mouth_H", overlay: "sen_1" }
+                normal: { eye: "eye_A_1", eyebrow: "eyebrow_A", mouth: "mouth_A", overlay: "" },
+                smile: { eye: "eye_A_1", eyebrow: "eyebrow_A", mouth: "mouth_B", overlay: "" },
+                happy: { eye: "eye_C", eyebrow: "eyebrow_B", mouth: "mouth_F", overlay: "" },
+                angry: { eye: "eye_I", eyebrow: "eyebrow_E", mouth: "mouth_I", overlay: "" },
+                sad: { eye: "eye_H", eyebrow: "eyebrow_D", mouth: "mouth_H", overlay: "" },
+                surprised: { eye: "eye_D", eyebrow: "eyebrow_D_2", mouth: "mouth_D", overlay: "" },
+                abnormal: { eye: "eye_H", eyebrow: "eyebrow_D", mouth: "mouth_H", overlay: "sen_1" }
             };
             var actionFacePresets = {
                 idle: "normal",
@@ -459,6 +463,11 @@
                 modelObject.position.set(0, 0, 0);
                 modelObject.rotation.set(0, 0, baseRotationZ);
                 modelObject.scale.setScalar(1);
+                if (modelKind === "enemy") {
+                    enemyMotionBasePosition = modelObject.position.clone();
+                    enemyMotionBaseRotation = modelObject.rotation.clone();
+                    enemyMotionTime = 0;
+                }
                 if (scaleRange) {
                     scaleRange.value = "100";
                     scaleValue.textContent = "100%";
@@ -513,10 +522,25 @@
                 if (!actionStrip) {
                     return;
                 }
+                var displayClips = clips.slice();
+                if (modelKind === "enemy" && displayClips.length === 0) {
+                    // Some public enemy GLBs were published without their matching
+                    // AnimationClip bundle. Keep the viewer useful with lightweight
+                    // procedural fallbacks; official clips still take precedence.
+                    displayClips = [
+                        { name: "idle" },
+                        { name: "damage" },
+                        { name: "dead" },
+                        { name: "skill_0" },
+                        { name: "skill_1" },
+                        { name: "charge_skill" },
+                        { name: "abnormal" }
+                    ];
+                }
                 actionStrip.querySelectorAll("button").forEach(function (button) { button.remove(); });
                 actionButtons = [];
                 var actionOrder = ["idle", "attack", "class_skill_1", "class_skill_2", "class_skill_3", "battle_run", "damage", "kirarajump_0", "win_st_0", "abnormal", "dead", "room_idle_L"];
-                clips.slice().sort(function (left, right) {
+                displayClips.sort(function (left, right) {
                     var leftIndex = actionOrder.indexOf(left.name);
                     var rightIndex = actionOrder.indexOf(right.name);
                     return (leftIndex < 0 ? actionOrder.length : leftIndex) - (rightIndex < 0 ? actionOrder.length : rightIndex);
@@ -541,14 +565,107 @@
                 });
             }
 
+            function classifyEnemyVisualPart(name) {
+                var lowered = String(name || "").toLowerCase();
+                var eye = lowered.match(/^eye(?:_(close|fun|angry))?_obj$/);
+                if (eye) {
+                    return { kind: "eye", state: eye[1] || "normal" };
+                }
+                var mouth = lowered.match(/^mouth_([a-z])_obj$/);
+                if (mouth) {
+                    return { kind: "mouth", state: mouth[1] };
+                }
+                return null;
+            }
+
+            function isEnemyAlternatePart(name) {
+                var lowered = String(name || "").toLowerCase();
+                return /^arm_up_/.test(lowered)
+                    || /^weapon_(?:close|[2-9])/.test(lowered)
+                    || /_(?:close|close_half)(?:_|$)/.test(lowered)
+                    || /_(?:[2-9])(?:_[ab])?_obj$/.test(lowered)
+                    || /_b_obj$/.test(lowered);
+            }
+
+            function applyEnemyVisualState(action) {
+                if (modelKind !== "enemy") {
+                    return;
+                }
+                var expressionByAction = {
+                    damage: { eye: "close", mouth: "e" },
+                    dead: { eye: "close", mouth: "e" },
+                    abnormal: { eye: "fun", mouth: "d" },
+                    charge_skill: { eye: "angry", mouth: "c" },
+                    skill_0: { eye: "angry", mouth: "c" },
+                    skill_1: { eye: "angry", mouth: "c" }
+                };
+                var requested = expressionByAction[action] || { eye: "normal", mouth: "a" };
+                Object.keys(enemyVisualParts).forEach(function (kind) {
+                    var states = enemyVisualParts[kind];
+                    var selectedState = states[requested[kind]] ? requested[kind]
+                        : states.normal ? "normal"
+                            : states.a ? "a" : Object.keys(states)[0];
+                    Object.keys(states).forEach(function (stateName) {
+                        states[stateName].forEach(function (node) {
+                            node.visible = stateName === selectedState;
+                        });
+                    });
+                });
+            }
+
+            function updateEnemyProceduralMotion(delta) {
+                if (modelKind !== "enemy" || !modelObject || activeClipAction || !motionEnabled) {
+                    return;
+                }
+                if (!enemyMotionBasePosition) {
+                    enemyMotionBasePosition = modelObject.position.clone();
+                    enemyMotionBaseRotation = modelObject.rotation.clone();
+                }
+                enemyMotionTime += delta;
+                var t = enemyMotionTime;
+                var action = activeAction;
+                var bob = 0;
+                var tilt = 0;
+                var turn = 0;
+                if (action === "damage") {
+                    bob = Math.sin(t * 34) * 0.018;
+                    tilt = Math.sin(t * 42) * 0.06;
+                } else if (action === "dead") {
+                    bob = -Math.min(0.28, t * 0.18);
+                    tilt = -Math.min(0.95, t * 0.6);
+                } else if (action === "skill_0" || action === "skill_1") {
+                    bob = Math.sin(t * 8) * 0.06;
+                    turn = Math.sin(t * 7) * 0.18;
+                    tilt = Math.sin(t * 10) * 0.12;
+                } else if (action === "charge_skill") {
+                    bob = Math.sin(t * 5) * 0.04;
+                    tilt = Math.sin(t * 5) * 0.08;
+                } else if (action === "abnormal") {
+                    bob = Math.sin(t * 11) * 0.025;
+                    turn = Math.sin(t * 13) * 0.08;
+                } else {
+                    bob = Math.sin(t * 2.4) * 0.012;
+                    turn = Math.sin(t * 1.5) * 0.025;
+                }
+                modelObject.position.copy(enemyMotionBasePosition);
+                modelObject.position.y += bob;
+                modelObject.rotation.copy(enemyMotionBaseRotation);
+                modelObject.rotation.x += tilt;
+                modelObject.rotation.y += turn;
+            }
+
             function selectAction(action) {
                 activeAction = action;
+                if (modelKind === "enemy" && !clipByName[action]) {
+                    enemyMotionTime = 0;
+                }
                 // Selecting a game action is an explicit request to show the
                 // matching in-game expression. Manual component edits remain
                 // available until the next action selection.
                 faceFollowsAction = true;
                 if (modelObject) {
                     selectFace(actionFacePresets[activeAction] || "normal", true);
+                    applyEnemyVisualState(activeAction);
                 }
                 var selectedButton = null;
                 actionButtons.forEach(function (button) {
@@ -605,15 +722,23 @@
                 if (!requested || !faceParts[kind]) {
                     return "";
                 }
-                if (faceParts[kind][requested]) {
-                    return requested;
+                var aliases = [requested];
+                if (kind === "eyebrow") {
+                    aliases.push(requested.replace(/^eyebrow_/, "eyebrrow_"));
+                    aliases.push(requested.replace(/^eyebrrow_/, "eyebrow_"));
+                }
+                var exact = aliases.find(function (name) { return faceParts[kind][name]; });
+                if (exact) {
+                    return exact;
                 }
                 if (!allowNumberedVariant) {
                     return "";
                 }
-                var variantPrefix = requested + "_";
+                var variantPrefixes = aliases.map(function (name) { return name + "_"; });
                 return Object.keys(faceParts[kind]).filter(function (name) {
-                    return name.indexOf(variantPrefix) === 0 && /^\d+$/.test(name.slice(variantPrefix.length));
+                    return variantPrefixes.some(function (prefix) {
+                        return name.indexOf(prefix) === 0 && /^\d+$/.test(name.slice(prefix.length));
+                    });
                 }).sort(function (a, b) {
                     return a.localeCompare(b, undefined, { numeric: true });
                 })[0] || "";
@@ -670,7 +795,7 @@
                     names.forEach(function (name) {
                         var option = document.createElement("option");
                         option.value = name;
-                        option.textContent = name.replace(/^(eye|eyebrrow|mouth)_/, "");
+                        option.textContent = name.replace(/^(eye|eyebrow|eyebrrow|mouth)_/, "");
                         select.appendChild(option);
                     });
                     select.setAttribute("aria-label", labels[kind]);
@@ -991,12 +1116,21 @@
                             var partName = child.name.slice(4);
                             if (/^eye_/.test(partName)) {
                                 child.userData.facePart = { kind: "eye", name: partName };
-                            } else if (/^eyebrrow_/.test(partName)) {
+                            } else if (/^(?:eyebrow|eyebrrow)_/.test(partName)) {
                                 child.userData.facePart = { kind: "eyebrow", name: partName };
                             } else if (/^mouth_/.test(partName)) {
                                 child.userData.facePart = { kind: "mouth", name: partName };
-                            } else if (partName === "cry" || /^(tere_|cheeck_|sen_|shade|shadow)/.test(partName)) {
+                            } else if (partName === "cry" || /^(tere_|cheek_|cheeck_|sen_|shade|shadow)/.test(partName)) {
                                 child.userData.facePart = { kind: "overlay", name: partName };
+                            }
+                        }
+                        if (modelKind === "enemy" && child.isMesh) {
+                            var enemyPart = classifyEnemyVisualPart(child.name);
+                            if (enemyPart) {
+                                enemyVisualParts[enemyPart.kind][enemyPart.state] = enemyVisualParts[enemyPart.kind][enemyPart.state] || [];
+                                enemyVisualParts[enemyPart.kind][enemyPart.state].push(child);
+                            } else if (isEnemyAlternatePart(child.name)) {
+                                child.visible = false;
                             }
                         }
                         if (child.isMesh && child.material) {
@@ -1028,6 +1162,7 @@
                     // Apply the normal preset before the asynchronous class action
                     // download so shade/debuff layers never flash during loading.
                     selectFace("normal", true);
+                    applyEnemyVisualState("idle");
                     gltf.animations.forEach(function (clip) {
                         clipByName[clip.name] = clip;
                     });
@@ -1037,6 +1172,9 @@
                         : clipByName.idle
                             ? "idle"
                             : gltf.animations[0] && gltf.animations[0].name;
+                    if (!activeAction && modelKind === "enemy") {
+                        activeAction = "idle";
+                    }
                     if (activeAction) {
                         selectAction(activeAction);
                         mixer.update(0);
@@ -1058,6 +1196,9 @@
                         });
                         mountActionControls(clips);
                         activeAction = clipByName.idle ? "idle" : clipByName.room_idle_L ? "room_idle_L" : clips[0] && clips[0].name;
+                        if (!activeAction && modelKind === "enemy") {
+                            activeAction = "idle";
+                        }
                         selectFace(actionFacePresets[activeAction] || "normal", true);
                         if (activeAction) {
                             selectAction(activeAction);
@@ -1125,6 +1266,9 @@
                         return;
                     }
                     modelObject.position.y = Number(verticalRange.value) / 100 * modelHeight;
+                    if (modelKind === "enemy" && enemyMotionBasePosition) {
+                        enemyMotionBasePosition.y = modelObject.position.y;
+                    }
                     verticalValue.textContent = verticalRange.value;
                 });
             }
@@ -1158,6 +1302,7 @@
                 if (mixer && motionEnabled) {
                     mixer.update(delta);
                 }
+                updateEnemyProceduralMotion(delta);
                 if (faceFollowsAction && activeAction === "idle" && activeFaceSelection) {
                     var blinkEye = resolveFacePartName("eye", "eye_C", true);
                     if (!blinkActive && time >= nextBlinkAt && blinkEye) {
