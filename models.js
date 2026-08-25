@@ -454,7 +454,7 @@
             var enemyMotionBaseRotation = null;
             var viewInteracted = false;
             var faceParts = { eye: {}, eyebrow: {}, mouth: {}, overlay: {} };
-            var enemyVisualParts = { eye: {}, mouth: {} };
+            var enemyVisualParts = {};
             var faceSelects = {};
             var facePresets = {
                 normal: { eye: "eye_A_1", eyebrow: "eyebrow_A", mouth: "mouth_A", overlay: "" },
@@ -631,24 +631,56 @@
                 });
             }
 
+            // Enemy sprites ship multiple expression states per feature plus a
+            // complete SIDE_* duplicate set for side-facing battle poses.  The
+            // viewer always faces the camera, so SIDE_* stays hidden and every
+            // expression group shows one state at a time.  State vocabulary was
+            // surveyed across all published enemy bundles.
+            var ENEMY_EXPRESSION_KINDS = { eye: "eye", eyebrow: "eyebrow", eyebrrow: "eyebrow", eyebroo: "eyebrow", mouth: "mouth" };
+            var ENEMY_EXPRESSION_STATES = {
+                a: 1, b: 1, c: 1, d: 1, e: 1,
+                anger: 1, angry: 1, close: 1, damaga: 1, damage: 1,
+                default: 1, fun: 1, joy: 1, normal: 1, open: 1,
+                ridicule: 1, wait: 1, front: 1
+            };
+            var ENEMY_DEFAULT_STATES = ["", "normal", "default", "wait", "front", "open", "a", "b", "c", "d", "e", "fun", "joy", "anger", "angry", "ridicule", "damaga", "damage", "close"];
+            var ENEMY_ACTION_STATES = {
+                damage: ["close"],
+                dead: ["close"],
+                abnormal: ["fun", "ridicule", "close"],
+                charge_skill: ["angry", "anger", "joy"],
+                skill_0: ["angry", "anger", "joy"],
+                skill_1: ["angry", "anger", "joy"]
+            };
+
             function classifyEnemyVisualPart(name) {
-                var lowered = String(name || "").toLowerCase();
-                var eye = lowered.match(/^eye(?:_(close|fun|angry))?_obj$/);
-                if (eye) {
-                    return { kind: "eye", state: eye[1] || "normal" };
+                var match = /^(eye|eyebrow|eyebrrow|eyebroo|mouth)(?:_([a-z0-9]+))?(?:_([lr]))?_obj$/.exec(String(name || "").toLowerCase());
+                if (!match) {
+                    return null;
                 }
-                var mouth = lowered.match(/^mouth_([a-z])_obj$/);
-                if (mouth) {
-                    return { kind: "mouth", state: mouth[1] };
+                var kind = ENEMY_EXPRESSION_KINDS[match[1]];
+                var state = match[2] || "";
+                if (state && !ENEMY_EXPRESSION_STATES[state]) {
+                    // Positional pieces (mouth_upper/lower/front/back, jaw
+                    // halves, ...) complement each other instead of switching.
+                    return null;
                 }
-                return null;
+                return { kind: kind, group: kind + (match[3] ? ":" + match[3] : ""), state: state };
+            }
+
+            function enemyDefaultState(states) {
+                var candidates = ENEMY_DEFAULT_STATES.filter(function (state) {
+                    return states[state];
+                });
+                return candidates[0] || Object.keys(states)[0];
             }
 
             function isEnemyAlternatePart(name) {
                 var lowered = String(name || "").toLowerCase();
-                return /^arm_up_/.test(lowered)
+                return /^side_/.test(lowered)
+                    || /^hand_[lr]\d/.test(lowered)
                     || /^weapon_(?:close|[2-9])/.test(lowered)
-                    || /_(?:close|close_half)(?:_|$)/.test(lowered)
+                    || /_(?:open|grip|close|close_half)(?:_|$)/.test(lowered)
                     || /_(?:[2-9])(?:_[ab])?_obj$/.test(lowered)
                     || /_b_obj$/.test(lowered);
             }
@@ -657,23 +689,28 @@
                 if (modelKind !== "enemy") {
                     return;
                 }
-                var expressionByAction = {
-                    damage: { eye: "close", mouth: "e" },
-                    dead: { eye: "close", mouth: "e" },
-                    abnormal: { eye: "fun", mouth: "d" },
-                    charge_skill: { eye: "angry", mouth: "c" },
-                    skill_0: { eye: "angry", mouth: "c" },
-                    skill_1: { eye: "angry", mouth: "c" }
-                };
-                var requested = expressionByAction[action] || { eye: "normal", mouth: "a" };
-                Object.keys(enemyVisualParts).forEach(function (kind) {
-                    var states = enemyVisualParts[kind];
-                    var selectedState = states[requested[kind]] ? requested[kind]
-                        : states.normal ? "normal"
-                            : states.a ? "a" : Object.keys(states)[0];
+                var requested = ENEMY_ACTION_STATES[action] || [];
+                Object.keys(enemyVisualParts).forEach(function (group) {
+                    var states = enemyVisualParts[group];
+                    var selected = "";
+                    requested.some(function (want) {
+                        if (states[want]) {
+                            selected = want;
+                        } else if (want === "angry" && states.anger) {
+                            selected = "anger";
+                        } else if (want === "anger" && states.angry) {
+                            selected = "angry";
+                        } else if (want === "damage" && states.damaga) {
+                            selected = "damaga";
+                        }
+                        return Boolean(selected);
+                    });
+                    if (!selected) {
+                        selected = enemyDefaultState(states);
+                    }
                     Object.keys(states).forEach(function (stateName) {
                         states[stateName].forEach(function (node) {
-                            node.visible = stateName === selectedState;
+                            node.visible = stateName === selected;
                         });
                     });
                 });
@@ -1235,8 +1272,9 @@
                         if (modelKind === "enemy" && child.isMesh) {
                             var enemyPart = classifyEnemyVisualPart(child.name);
                             if (enemyPart) {
-                                enemyVisualParts[enemyPart.kind][enemyPart.state] = enemyVisualParts[enemyPart.kind][enemyPart.state] || [];
-                                enemyVisualParts[enemyPart.kind][enemyPart.state].push(child);
+                                enemyVisualParts[enemyPart.group] = enemyVisualParts[enemyPart.group] || {};
+                                enemyVisualParts[enemyPart.group][enemyPart.state] = enemyVisualParts[enemyPart.group][enemyPart.state] || [];
+                                enemyVisualParts[enemyPart.group][enemyPart.state].push(child);
                             } else if (isEnemyAlternatePart(child.name)) {
                                 child.visible = false;
                             }
