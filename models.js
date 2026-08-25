@@ -12,6 +12,45 @@
     var MODEL_TITLES = [];
     var manifestState = { loaded: false, error: false };
     var activeModelCleanup = null;
+    var THREE_BUILD = "0.180.0";
+    var MODULE_SOURCES = [
+        {
+            three: "./vendor/three/three.module.min.js",
+            orbit: "./vendor/three/OrbitControls.js",
+            gltf: "./vendor/three/GLTFLoader.js",
+            meshopt: "./vendor/three/meshopt_decoder.module.js"
+        },
+        {
+            three: "https://cdn.jsdelivr.net/npm/three@" + THREE_BUILD + "/build/three.module.js",
+            orbit: "https://cdn.jsdelivr.net/npm/three@" + THREE_BUILD + "/examples/jsm/controls/OrbitControls.js",
+            gltf: "https://cdn.jsdelivr.net/npm/three@" + THREE_BUILD + "/examples/jsm/loaders/GLTFLoader.js",
+            meshopt: "https://cdn.jsdelivr.net/npm/three@" + THREE_BUILD + "/examples/jsm/libs/meshopt_decoder.module.js"
+        }
+    ];
+    var viewerModules = null;
+
+    // Prefer the vendored copies so the viewer keeps working where the CDN is
+    // unreachable; the import map in models.html only backs up the fallback's
+    // bare "three" specifier.
+    function loadViewerModules() {
+        if (viewerModules) {
+            return viewerModules;
+        }
+        viewerModules = MODULE_SOURCES.reduce(function (chain, source) {
+            return chain.catch(function () {
+                return Promise.all([
+                    import(source.three),
+                    import(source.orbit),
+                    import(source.gltf),
+                    import(source.meshopt)
+                ]);
+            });
+        }, Promise.reject()).catch(function (error) {
+            viewerModules = null;
+            throw error;
+        });
+        return viewerModules;
+    }
     var state = {
         allModels: [],
         filteredModels: [],
@@ -375,12 +414,7 @@
             return;
         }
 
-        Promise.all([
-            import("three"),
-            import("three/addons/controls/OrbitControls.js"),
-            import("three/addons/loaders/GLTFLoader.js"),
-            import("three/addons/libs/meshopt_decoder.module.js")
-        ]).then(function (modules) {
+        loadViewerModules().then(function (modules) {
             var THREE = modules[0];
             var OrbitControls = modules[1].OrbitControls;
             var GLTFLoader = modules[2].GLTFLoader;
@@ -400,6 +434,7 @@
             var clipByName = {};
             var motionEnabled = true;
             var activeAction = "idle";
+            var actionChosenByUser = false;
             var faceFollowsAction = true;
             var activeFaceSelection = null;
             var nextBlinkAt = window.performance.now() + 2800;
@@ -414,11 +449,10 @@
             var homeView = null;
             var modelHeight = 1;
             var baseRotationZ = 0;
-            var lastViewportWidth = 0;
-            var lastViewportHeight = 0;
             var enemyMotionTime = 0;
             var enemyMotionBasePosition = null;
             var enemyMotionBaseRotation = null;
+            var viewInteracted = false;
             var faceParts = { eye: {}, eyebrow: {}, mouth: {}, overlay: {} };
             var enemyVisualParts = { eye: {}, mouth: {} };
             var faceSelects = {};
@@ -433,6 +467,17 @@
             };
             var actionFacePresets = {
                 idle: "normal",
+                room_idle_L: "normal",
+                battle_run: "normal",
+                attack: "angry",
+                charge_skill: "angry",
+                skill_0: "angry",
+                skill_1: "angry",
+                class_skill_1: "angry",
+                class_skill_2: "angry",
+                class_skill_3: "angry",
+                kirarajump_0: "smile",
+                win_st_0: "smile",
                 damage: "sad",
                 abnormal: "abnormal",
                 dead: "abnormal"
@@ -443,7 +488,24 @@
             renderer.setClearColor(0x000000, 0);
             host.innerHTML = "";
             host.appendChild(renderer.domElement);
+            // Keep a live loading overlay over the canvas: GLB downloads can
+            // take seconds on slow links and a blank stage reads as breakage.
+            var loadingNote = document.createElement("div");
+            loadingNote.className = "model-3d-loading";
+            loadingNote.innerHTML = "<span class='model-spinner' aria-hidden='true'></span><p>正在读取模型数据……</p>";
+            host.appendChild(loadingNote);
             scene.add(new THREE.AmbientLight(0xffffff, 2));
+
+            function setModelLoadNote(text) {
+                var line = loadingNote.querySelector("p");
+                if (line) {
+                    line.textContent = text ? "正在读取模型数据…… " + text : "正在读取模型数据……";
+                }
+            }
+
+            function hideModelLoadNote() {
+                loadingNote.remove();
+            }
 
             function resetView() {
                 if (homeView) {
@@ -478,7 +540,10 @@
                 }
             }
 
-            function fitModelView() {
+            function fitModelView(force) {
+                if (!force && viewInteracted) {
+                    return;
+                }
                 var bounds = new THREE.Box3().setFromObject(modelObject);
                 if (bounds.isEmpty()) {
                     return;
@@ -552,6 +617,7 @@
                     button.setAttribute("aria-pressed", String(index === 0));
                     button.innerHTML = escapeHtml(friendlyActionName(clip.name)) + "<small>" + escapeHtml(clip.name) + "</small>";
                     button.addEventListener("click", function () {
+                        actionChosenByUser = true;
                         if (!motionEnabled && motionButton) {
                             motionEnabled = true;
                             motionButton.setAttribute("aria-pressed", "true");
@@ -818,14 +884,14 @@
             function resize() {
                 var width = Math.max(1, host.clientWidth);
                 var height = Math.max(1, host.clientHeight);
-                var sizeChanged = width !== lastViewportWidth || height !== lastViewportHeight;
-                lastViewportWidth = width;
-                lastViewportHeight = height;
                 camera.aspect = width / height;
                 camera.updateProjectionMatrix();
                 renderer.setSize(width, height, false);
-                if (sizeChanged && modelObject) {
-                    fitModelView();
+                // Reframe only while the visitor has not taken manual control of
+                // the camera, so mobile browser chrome and panel resizes never
+                // yank the view (or drift while an animation plays).
+                if (modelObject && !viewInteracted) {
+                    fitModelView(true);
                 }
             }
 
@@ -839,13 +905,40 @@
             controls.maxAzimuthAngle = Math.PI / 12;
             controls.minPolarAngle = Math.PI / 2 - Math.PI / 18;
             controls.maxPolarAngle = Math.PI / 2 + Math.PI / 18;
+            controls.addEventListener("start", function () {
+                viewInteracted = true;
+            });
 
             function fetchModel(url) {
                 return fetch(url).then(function (response) {
                     if (!response.ok) {
                         throw new Error("HTTP " + response.status);
                     }
-                    return response;
+                    if (!response.body || typeof Response === "undefined") {
+                        return response;
+                    }
+                    var total = Number(response.headers.get("Content-Length") || 0);
+                    if (!total) {
+                        return response;
+                    }
+                    var reader = response.body.getReader();
+                    var chunks = [];
+                    var received = 0;
+                    function pump() {
+                        return reader.read().then(function (result) {
+                            if (result.done) {
+                                return new Response(new Blob(chunks), {
+                                    status: response.status,
+                                    headers: response.headers
+                                });
+                            }
+                            received += result.value.byteLength;
+                            setModelLoadNote(Math.min(99, Math.round((received / total) * 100)) + "%");
+                            chunks.push(result.value);
+                            return pump();
+                        });
+                    }
+                    return pump();
                 });
             }
 
@@ -882,11 +975,13 @@
                         if (!("DecompressionStream" in window)) {
                             throw new Error("gzip decompression is unavailable");
                         }
+                        setModelLoadNote("解压中……");
                         var stream = blob.stream().pipeThrough(new DecompressionStream("gzip"));
                         return new Response(stream).blob();
                     }
                     return blob;
                 }).then(function (blob) {
+                    setModelLoadNote("");
                     var objectUrl = URL.createObjectURL(blob);
                     objectUrls.push(objectUrl);
                     return objectUrl;
@@ -1096,6 +1191,19 @@
                 }).catch(function () { return []; });
             }
 
+            function showViewerError(message) {
+                if (disposed || !document.body.contains(host)) {
+                    return;
+                }
+                host.innerHTML = "<div class='model-3d-error'><p>" + escapeHtml(message) + "</p><button type='button'>重试加载</button></div>";
+                host.querySelector("button").addEventListener("click", function () {
+                    if (activeModelCleanup) {
+                        activeModelCleanup();
+                    }
+                    mount3DModel(preview, metadata, modelKind);
+                });
+            }
+
             cacheModel(preview.file, preview.compression).then(function (sourceUrl) {
                 var loader = new GLTFLoader();
                 loader.setMeshoptDecoder(MeshoptDecoder);
@@ -1185,6 +1293,12 @@
                             return Object.keys(faceParts[kind]).length > 0;
                         });
                     }
+                    // Frame the model as soon as it exists; the asynchronous
+                    // class-action and weapon downloads must not leave the
+                    // canvas staring at the default camera.
+                    hideModelLoadNote();
+                    modelObject.updateMatrixWorld(true);
+                    fitModelView(true);
                     loadClassActionClips(loader).then(function (classClips) {
                         var clips = [];
                         clipByName = {};
@@ -1195,11 +1309,15 @@
                             }
                         });
                         mountActionControls(clips);
-                        activeAction = clipByName.idle ? "idle" : clipByName.room_idle_L ? "room_idle_L" : clips[0] && clips[0].name;
-                        if (!activeAction && modelKind === "enemy") {
-                            activeAction = "idle";
+                        if (!actionChosenByUser) {
+                            activeAction = clipByName.idle ? "idle" : clipByName.room_idle_L ? "room_idle_L" : clips[0] && clips[0].name;
+                            if (!activeAction && modelKind === "enemy") {
+                                activeAction = "idle";
+                            }
                         }
-                        selectFace(actionFacePresets[activeAction] || "normal", true);
+                        if (faceFollowsAction) {
+                            selectFace(actionFacePresets[activeAction] || "normal", true);
+                        }
                         if (activeAction) {
                             selectAction(activeAction);
                         }
@@ -1218,10 +1336,10 @@
                         host.classList.add("is-ready");
                     });
                 }, undefined, function () {
-                    host.innerHTML = "<div class='model-3d-error'>GLB 模型加载失败，请刷新后重试。</div>";
+                    showViewerError("GLB 模型解析失败，文件可能已损坏或下载不完整。");
                 });
             }).catch(function () {
-                host.innerHTML = "<div class='model-3d-error'>模型下载或缓存失败，请检查网络后重试。</div>";
+                showViewerError("模型下载或解压失败，请检查网络后重试。");
             });
 
             if (motionButton) {
@@ -1272,16 +1390,6 @@
                     verticalValue.textContent = verticalRange.value;
                 });
             }
-            actionButtons.forEach(function (button) {
-                button.addEventListener("click", function () {
-                    if (!motionEnabled && motionButton) {
-                        motionEnabled = true;
-                        motionButton.setAttribute("aria-pressed", "true");
-                        motionButton.textContent = "暂停动作";
-                    }
-                    selectAction(button.dataset.modelAction);
-                });
-            });
             faceButtons.forEach(function (button) {
                 button.addEventListener("click", function () {
                     selectFace(button.dataset.facePreset, false);
@@ -1376,7 +1484,10 @@
             };
         }).catch(function () {
             if (document.body.contains(host)) {
-                host.innerHTML = "<div class='model-3d-error'>WebGL 模块加载失败，请检查网络后重试。</div>";
+                host.innerHTML = "<div class='model-3d-error'><p>WebGL 模块加载失败，本地内置模块与 CDN 均不可达，请检查网络后重试。</p><button type='button'>重试加载</button></div>";
+                host.querySelector("button").addEventListener("click", function () {
+                    mount3DModel(preview, metadata, modelKind);
+                });
             }
         });
     }
