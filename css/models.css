@@ -124,6 +124,9 @@ main { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 54
 .model-list-arrow { margin-left: auto; color: #ad8e9a; font-size: 1.2rem; }
 .models-list-empty { padding: 26px 14px; color: var(--model-muted); font-size: 0.8rem; text-align: center; }
 .models-list-empty a { color: var(--model-rose); }
+.models-list-empty button { margin-top: 12px; padding: 7px 20px; border: 1px solid var(--model-line); border-radius: 999px; background: #fffaf8; color: var(--model-rose); font-size: 0.72rem; cursor: pointer; }
+.models-list-empty button:hover { background: #fdf0f3; }
+.models-list-empty button:disabled { opacity: 0.55; cursor: default; }
 .models-pagination { display: flex; justify-content: center; align-items: center; gap: 12px; padding: 14px; border-top: 1px solid #eee4e2; color: var(--model-muted); font-size: 0.75rem; }
 .models-pagination button { width: 28px; height: 28px; border: 1px solid #dacdd0; border-radius: 4px; background: #fff; color: var(--model-rose); cursor: pointer; }
 .models-pagination button:disabled { opacity: 0.4; cursor: default; }

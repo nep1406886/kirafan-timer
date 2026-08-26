@@ -681,8 +681,8 @@
                     || /^hand_[lr]\d/.test(lowered)
                     || /^weapon_(?:close|[2-9])/.test(lowered)
                     || /_(?:open|grip|close|close_half)(?:_|$)/.test(lowered)
-                    || /_(?:[2-9])(?:_[ab])?_obj$/.test(lowered)
-                    || /_b_obj$/.test(lowered);
+                    || /_(?:[2-9])(?:_[ab])?(_obj)?$/.test(lowered)
+                    || /_b(_obj)?$/.test(lowered);
             }
 
             function applyEnemyVisualState(action) {
@@ -847,6 +847,35 @@
                 })[0] || "";
             }
 
+            // Models without the standard preset parts (hybrid enemies with
+            // player-style faces) need a neutral fallback: prefer explicit
+            // default/normal variants over damage states, which sort first
+            // alphabetically but read as broken eyes and mouths.
+            function fallbackFacePart(kind) {
+                var names = Object.keys(faceParts[kind]);
+                if (!names.length) {
+                    return "";
+                }
+                var preferences = ["default", "normal", "open", "wait", "a"];
+                for (var i = 0; i < preferences.length; i++) {
+                    var wanted = kind + "_" + preferences[i];
+                    if (faceParts[kind][wanted]) {
+                        return wanted;
+                    }
+                    var variants = names.filter(function (name) {
+                        return name.indexOf(wanted + "_") === 0;
+                    }).sort(function (a, b) {
+                        return a.localeCompare(b, undefined, { numeric: true });
+                    });
+                    if (variants.length) {
+                        return variants[0];
+                    }
+                }
+                return names.sort(function (a, b) {
+                    return a.localeCompare(b, undefined, { numeric: true });
+                })[0];
+            }
+
             function selectFace(presetName, automatic) {
                 faceFollowsAction = Boolean(automatic);
                 var preset = facePresets[presetName] || facePresets.normal;
@@ -864,10 +893,7 @@
                     }
                     var normalPart = facePresets.normal[kind];
                     selectedParts[kind] = resolveFacePartName(kind, normalPart, true)
-                        || Object.keys(faceParts[kind]).sort(function (a, b) {
-                            return a.localeCompare(b, undefined, { numeric: true });
-                        })[0]
-                        || "";
+                        || fallbackFacePart(kind);
                 });
                 applyFaceSelection(selectedParts, presetName, faceFollowsAction);
             }
@@ -1253,8 +1279,9 @@
                     modelObject.traverse(function (child) {
                         var isPlayer = Boolean(metadata);
                         var loweredName = String(child.name || "").toLowerCase();
-                        if (!isPlayer && (/^[lrt]\d+_/.test(loweredName) && loweredName.indexOf("l30_") !== 0
-                            || /(damage|abnormal|flash|blur)/.test(loweredName))) {
+                        var isFaceLayer = loweredName.indexOf("l30_") === 0;
+                        if (!isPlayer && ((/^[lrt]\d+_/.test(loweredName) && !isFaceLayer)
+                            || (!isFaceLayer && /(damage|abnormal|flash|blur)/.test(loweredName)))) {
                             child.visible = false;
                         }
                         if (!child.userData.facePart && loweredName.indexOf("l30_") === 0) {
@@ -1290,6 +1317,14 @@
                             child.material.depthTest = true;
                             child.material.side = THREE.DoubleSide;
                             child.renderOrder = Number(child.userData.renderOrder || (child.geometry && child.geometry.userData.renderOrder) || 0);
+                            // Skinned vertices follow their bones, but frustum
+                            // culling uses the node's bounding sphere, which
+                            // stays at the skeleton origin for these exports —
+                            // zooming onto the face culled eyes, brows, and
+                            // mouths. Skinned pieces must never be culled.
+                            if (child.isSkinnedMesh) {
+                                child.frustumCulled = false;
+                            }
                             if (isPlayer && /hand/.test(loweredName)) {
                                 child.material = child.material.clone();
                                 child.material.transparent = false;
@@ -1680,8 +1715,17 @@
                 selectModel(initialModel);
             }
         }).catch(function () {
-            setStatus("素材索引暂时无法连接，请检查网络后刷新页面", "error");
-            elements.list.innerHTML = "<div class='models-list-empty'>索引加载失败。<br>官方素材库：<a href='https://asset.kirafan.moe/' target='_blank' rel='noopener noreferrer'>asset.kirafan.moe ↗</a></div>";
+            setStatus("素材索引暂时无法连接，请检查网络后重试", "error");
+            elements.list.innerHTML = "<div class='models-list-empty'>索引加载失败。<br>官方素材库：<a href='https://asset.kirafan.moe/' target='_blank' rel='noopener noreferrer'>asset.kirafan.moe ↗</a><br><button id='retryDatabase' type='button'>重新连接</button></div>";
+            var retry = document.getElementById("retryDatabase");
+            if (retry) {
+                retry.addEventListener("click", function () {
+                    retry.disabled = true;
+                    retry.textContent = "连接中……";
+                    setStatus("正在重新连接 KiraFan Assets 素材索引……", "");
+                    loadDatabase();
+                });
+            }
         });
     }
 
