@@ -2,7 +2,7 @@
     "use strict";
 
     var DATABASE_URL = "https://database.kirafan.cn/assetBundle.json";
-    var MODEL_MANIFEST_URL = "asset/models/manifest.json?v=20260819-4";
+    var MODEL_MANIFEST_URL = "asset/models/manifest.json?v=20260826-1";
     var ASSET_HOST = "https://asset.kirafan.cn/";
     var INDEX_PAGE_SIZE = 30;
     var MODEL_PATH = /^model\/(player|enemy|weapon|shadow)\//;
@@ -10,7 +10,12 @@
     var CLASS_ACTION_PREVIEWS = {};
     var PLAYER_MODEL_META = {};
     var MODEL_TITLES = [];
-    var manifestState = { loaded: false, error: false };
+    var manifestState = { loaded: false, error: false, offline: false };
+    // Chrome gives file:// pages an opaque origin, so neither fetch nor
+    // XMLHttpRequest can read manifest.json or any .glb.gz next to the page.
+    // 3D preview is impossible here no matter how the request is made.
+    var IS_LOCAL_FILE = window.location.protocol === "file:";
+    var LOCAL_FILE_HINT = "本地直接打开页面时浏览器禁止读取同目录文件，3D 预览不可用；请在项目目录运行 python -m http.server 8642 后访问 http://localhost:8642/models.html";
     var activeModelCleanup = null;
     var THREE_BUILD = "0.180.0";
     var MODULE_SOURCES = [
@@ -239,14 +244,16 @@
             var countElement = document.querySelector("[data-count='" + key + "']");
             if (countElement) {
                 countElement.textContent = key === "ready" && manifestState.error
-                    ? "加载失败"
+                    ? (manifestState.offline ? "不可用" : "加载失败")
                     : counts[key].toLocaleString("zh-CN");
             }
         });
         var readyButton = document.querySelector(".models-filter[data-kind='ready']");
         if (readyButton) {
             readyButton.disabled = manifestState.error;
-            readyButton.title = manifestState.error ? "WebGL 清单未能载入，请刷新或检查部署文件" : "只显示可直接预览的模型";
+            readyButton.title = manifestState.offline
+                ? LOCAL_FILE_HINT
+                : (manifestState.error ? "WebGL 清单未能载入，请刷新或检查部署文件" : "只显示可直接预览的模型");
         }
     }
 
@@ -353,7 +360,9 @@
         var faceMarkup = preview
             ? "<section class='model-control-section' id='modelFaceInterface'" + (preview.expressions ? "" : " hidden") + "><div class='model-control-heading'><strong>表情</strong><small>状态层默认关闭</small></div><div class='model-face-strip' role='group' aria-label='表情预设'><button class='is-active' type='button' id='modelFaceAuto' aria-pressed='true'>跟随动作</button><button type='button' data-face-preset='normal' aria-pressed='false'>通常</button><button type='button' data-face-preset='smile' aria-pressed='false'>微笑</button><button type='button' data-face-preset='happy' aria-pressed='false'>开心</button><button type='button' data-face-preset='angry' aria-pressed='false'>生气</button><button type='button' data-face-preset='sad' aria-pressed='false'>难过</button><button type='button' data-face-preset='surprised' aria-pressed='false'>惊讶</button><button type='button' data-face-preset='abnormal' aria-pressed='false'>异常状态</button></div><details class='model-face-advanced' id='modelFaceAdvanced'><summary>表情组件</summary><div id='modelFaceControls' class='model-face-controls'></div></details></section>"
             : "";
-        var unavailableMarkup = manifestState.error
+        var unavailableMarkup = manifestState.offline
+            ? "<div class='model-conversion-note'><strong>本地直接打开时无法预览 3D 模型</strong><span>" + escapeHtml(LOCAL_FILE_HINT) + "</span></div>"
+            : manifestState.error
             ? "<div class='model-conversion-note'><strong>WebGL 模型清单未能载入</strong><span>纹理索引正常；请刷新页面，或检查部署中是否包含 asset/models/manifest.json。</span></div>"
             : "<div class='model-conversion-note'><strong>该条目的原始模型包当前不可用</strong><span>源素材索引仍保留条目，但转换时无法取得 Unity 包；透明纹理仍可正常查看。</span></div>";
         var dedicatedWeapon = metadata && metadata.dedicatedWeapon;
@@ -389,6 +398,68 @@
         if (preview) {
             mount3DModel(preview, metadata, parts.kind);
         }
+    }
+
+    // The exporter records each sprite layer's draw order in the glTF node
+    // extras, but gltfpack strips mesh names and mesh extras, so the value only
+    // survives on the wrapper node that GLTFLoader builds around a skinned
+    // mesh. Reading it off the mesh alone left every layer at 0, which let
+    // legs, feet and brows sort arbitrarily.
+    // Blush, tear, pallor, anger-mark and effect-text layers ship visible and
+    // belong to specific expressions. Naming is inconsistent across bundles
+    // (cheek_A, cheeck1, tere, sen, blue, bule, aozame, angry, text_B), so all
+    // spellings must be recognised or the unmatched ones stay burned onto every
+    // face.
+    var FACE_OVERLAY_PART = /^(?:cry|namida|tere|cheek|cheeck|sen|shade|shadow|blue|bule|aozame|pale|angry|sad|shy|question|black|red|text)(?:\d|_|$)/;
+    var FACE_KIND_PATTERN = /^(eyebrow|mouth|eye)(.*)$/;
+
+    // Layer names vary in case, in brow spelling (eyebrow / eyebrrow / eyeblow)
+    // and in whether the variant suffix is separated (Eye_F2 vs eye_F_2). Every
+    // lookup goes through one canonical key so presets written one way still
+    // find parts named another.
+    function canonicalFacePartKey(partName) {
+        var lowered = String(partName).toLowerCase().replace(/^(?:eyebrrow|eyeblow)/, "eyebrow");
+        var match = FACE_KIND_PATTERN.exec(lowered);
+        if (!match) {
+            return lowered;
+        }
+        var rest = match[2].replace(/^_+/, "").replace(/([a-z])(\d)/g, "$1_$2");
+        return rest ? match[1] + "_" + rest : match[1];
+    }
+
+    function classifyFacePart(partName) {
+        var canonical = canonicalFacePartKey(partName);
+        if (/^eyebrow(?:_|$)/.test(canonical)) {
+            return "eyebrow";
+        }
+        if (/^eye(?:_|$)/.test(canonical)) {
+            return "eye";
+        }
+        if (/^mouth(?:_|$)/.test(canonical)) {
+            return "mouth";
+        }
+        if (FACE_OVERLAY_PART.test(canonical)) {
+            return "overlay";
+        }
+        return "";
+    }
+
+    function resolveRenderOrder(mesh) {
+        var candidates = [mesh, mesh.parent];
+        for (var i = 0; i < candidates.length; i++) {
+            var node = candidates[i];
+            if (!node) {
+                continue;
+            }
+            if (node.userData && node.userData.renderOrder !== undefined && node.userData.renderOrder !== null) {
+                return Number(node.userData.renderOrder) || 0;
+            }
+        }
+        var geometry = mesh.geometry;
+        if (geometry && geometry.userData && geometry.userData.renderOrder !== undefined) {
+            return Number(geometry.userData.renderOrder) || 0;
+        }
+        return 0;
     }
 
     function mount3DModel(preview, metadata, modelKind) {
@@ -456,14 +527,19 @@
             var faceParts = { eye: {}, eyebrow: {}, mouth: {}, overlay: {} };
             var enemyVisualParts = {};
             var faceSelects = {};
+            // Letters index the head atlas layers, but their meaning is not
+            // stable across characters and most bundles ship only a subset, so
+            // every slot lists candidates in falling preference. Verified
+            // against rendered contact sheets: eye_I is an iris-less oval and
+            // mouth_F an untextured white block, so neither may be requested.
             var facePresets = {
-                normal: { eye: "eye_A_1", eyebrow: "eyebrow_A", mouth: "mouth_A", overlay: "" },
-                smile: { eye: "eye_A_1", eyebrow: "eyebrow_A", mouth: "mouth_B", overlay: "" },
-                happy: { eye: "eye_C", eyebrow: "eyebrow_B", mouth: "mouth_F", overlay: "" },
-                angry: { eye: "eye_I", eyebrow: "eyebrow_E", mouth: "mouth_I", overlay: "" },
-                sad: { eye: "eye_H", eyebrow: "eyebrow_D", mouth: "mouth_H", overlay: "" },
-                surprised: { eye: "eye_D", eyebrow: "eyebrow_D_2", mouth: "mouth_D", overlay: "" },
-                abnormal: { eye: "eye_H", eyebrow: "eyebrow_D", mouth: "mouth_H", overlay: "sen_1" }
+                normal: { eye: ["eye_A_1", "eye_A"], eyebrow: ["eyebrow_A"], mouth: ["mouth_A", "mouth_B"], overlay: [] },
+                smile: { eye: ["eye_A_1", "eye_A"], eyebrow: ["eyebrow_A"], mouth: ["mouth_L", "mouth_D", "mouth_B", "mouth_A"], overlay: [] },
+                happy: { eye: ["eye_C", "eye_E", "eye_A_1", "eye_A"], eyebrow: ["eyebrow_B", "eyebrow_A"], mouth: ["mouth_D", "mouth_L", "mouth_C", "mouth_B"], overlay: [] },
+                angry: { eye: ["eye_J", "eye_F", "eye_D_2", "eye_A_1", "eye_A"], eyebrow: ["eyebrow_E", "eyebrow_D", "eyebrow_A"], mouth: ["mouth_I", "mouth_C_2", "mouth_C", "mouth_E"], overlay: [] },
+                sad: { eye: ["eye_G", "eye_E", "eye_D", "eye_A_1", "eye_A"], eyebrow: ["eyebrow_D", "eyebrow_C", "eyebrow_A"], mouth: ["mouth_G", "mouth_H", "mouth_B"], overlay: [] },
+                surprised: { eye: ["eye_F", "eye_B_1", "eye_B", "eye_D_2", "eye_A_1", "eye_A"], eyebrow: ["eyebrow_D_2", "eyebrow_D", "eyebrow_A"], mouth: ["mouth_C", "mouth_C_2", "mouth_D"], overlay: [] },
+                abnormal: { eye: ["eye_G_2", "eye_G", "eye_E", "eye_K", "eye_A_1", "eye_A"], eyebrow: ["eyebrow_D", "eyebrow_C", "eyebrow_A"], mouth: ["mouth_G", "mouth_H", "mouth_B"], overlay: ["sen_1", "sen", "shade"] }
             };
             var actionFacePresets = {
                 idle: "normal",
@@ -825,26 +901,35 @@
                 if (!requested || !faceParts[kind]) {
                     return "";
                 }
-                var aliases = [requested];
-                if (kind === "eyebrow") {
-                    aliases.push(requested.replace(/^eyebrow_/, "eyebrrow_"));
-                    aliases.push(requested.replace(/^eyebrrow_/, "eyebrow_"));
+                var wanted = Array.isArray(requested) ? requested : [requested];
+                for (var c = 0; c < wanted.length; c++) {
+                    var hit = resolveOneFacePartName(kind, wanted[c], allowNumberedVariant);
+                    if (hit) {
+                        return hit;
+                    }
                 }
-                var exact = aliases.find(function (name) { return faceParts[kind][name]; });
-                if (exact) {
-                    return exact;
+                return "";
+            }
+
+            function resolveOneFacePartName(kind, requested, allowNumberedVariant) {
+                if (!requested) {
+                    return "";
+                }
+                var available = faceParts[kind];
+                var wanted = canonicalFacePartKey(requested);
+                if (available[wanted]) {
+                    return available[wanted];
                 }
                 if (!allowNumberedVariant) {
                     return "";
                 }
-                var variantPrefixes = aliases.map(function (name) { return name + "_"; });
-                return Object.keys(faceParts[kind]).filter(function (name) {
-                    return variantPrefixes.some(function (prefix) {
-                        return name.indexOf(prefix) === 0 && /^\d+$/.test(name.slice(prefix.length));
-                    });
+                var prefix = wanted + "_";
+                var variant = Object.keys(available).filter(function (key) {
+                    return key.indexOf(prefix) === 0 && /^\d+$/.test(key.slice(prefix.length));
                 }).sort(function (a, b) {
                     return a.localeCompare(b, undefined, { numeric: true });
-                })[0] || "";
+                })[0];
+                return variant ? available[variant] : "";
             }
 
             // Models without the standard preset parts (hybrid enemies with
@@ -852,28 +937,29 @@
             // default/normal variants over damage states, which sort first
             // alphabetically but read as broken eyes and mouths.
             function fallbackFacePart(kind) {
-                var names = Object.keys(faceParts[kind]);
-                if (!names.length) {
+                var available = faceParts[kind];
+                var keys = Object.keys(available);
+                if (!keys.length) {
                     return "";
                 }
                 var preferences = ["default", "normal", "open", "wait", "a"];
                 for (var i = 0; i < preferences.length; i++) {
                     var wanted = kind + "_" + preferences[i];
-                    if (faceParts[kind][wanted]) {
-                        return wanted;
+                    if (available[wanted]) {
+                        return available[wanted];
                     }
-                    var variants = names.filter(function (name) {
-                        return name.indexOf(wanted + "_") === 0;
+                    var variants = keys.filter(function (key) {
+                        return key.indexOf(wanted + "_") === 0;
                     }).sort(function (a, b) {
                         return a.localeCompare(b, undefined, { numeric: true });
                     });
                     if (variants.length) {
-                        return variants[0];
+                        return available[variants[0]];
                     }
                 }
-                return names.sort(function (a, b) {
+                return available[keys.sort(function (a, b) {
                     return a.localeCompare(b, undefined, { numeric: true });
-                })[0];
+                })[0]];
             }
 
             function selectFace(presetName, automatic) {
@@ -905,10 +991,10 @@
                 var labels = { eye: "眼睛", eyebrow: "眉毛", mouth: "嘴型", overlay: "附加" };
                 faceControls.innerHTML = "";
                 Object.keys(labels).forEach(function (kind) {
-                    var names = Object.keys(faceParts[kind]).sort(function (a, b) {
+                    var keys = Object.keys(faceParts[kind]).sort(function (a, b) {
                         return a.localeCompare(b, undefined, { numeric: true });
                     });
-                    if (names.length === 0) {
+                    if (keys.length === 0) {
                         return;
                     }
                     var label = document.createElement("label");
@@ -921,10 +1007,10 @@
                         emptyOption.textContent = "无";
                         select.appendChild(emptyOption);
                     }
-                    names.forEach(function (name) {
+                    keys.forEach(function (key) {
                         var option = document.createElement("option");
-                        option.value = name;
-                        option.textContent = name.replace(/^(eye|eyebrow|eyebrrow|mouth)_/, "");
+                        option.value = faceParts[kind][key];
+                        option.textContent = key.replace(/^(eye|eyebrow|mouth)_/, "");
                         select.appendChild(option);
                     });
                     select.setAttribute("aria-label", labels[kind]);
@@ -1006,31 +1092,18 @@
             }
 
             function readModelResponse(url) {
-                if (!("caches" in window)) {
-                    return fetchModel(url);
-                }
-                return caches.open("kirafan-model-glb-v2").then(function (cache) {
-                    return cache.match(url).then(function (cached) {
-                        if (cached) {
-                            return cached;
-                        }
-                        return fetchModel(url).then(function (response) {
-                            return cache.put(url, response.clone()).catch(function () {
-                                // Cache quotas must not prevent the selected model from rendering.
-                            }).then(function () {
-                                return response;
-                            });
-                        });
-                    });
-                }).catch(function () {
-                    return fetchModel(url);
+                // Plain fetch: the Cache API put/clone detour corrupted a few
+                // texture bodies under load, and the browser HTTP cache already
+                // covers repeat visits on the deployment.
+                return fetch(url).then(function (response) {
+                    if (!response.ok) {
+                        throw new Error("HTTP " + response.status);
+                    }
+                    return response;
                 });
             }
 
             function cacheModel(url, compression) {
-                if (!compression && !("caches" in window)) {
-                    return Promise.resolve(url);
-                }
                 return readModelResponse(url).then(function (response) {
                     return response.blob();
                 }).then(function (blob) {
@@ -1045,6 +1118,19 @@
                     return blob;
                 }).then(function (blob) {
                     setModelLoadNote("");
+                    if (blob.size >= 20) {
+                        return blob.slice(0, 20).arrayBuffer().then(function (head) {
+                            var view = new DataView(head);
+                            var magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+                            var total = view.getUint32(8, true);
+                            if (magic !== "glTF" || total !== blob.size) {
+                                console.warn("GLB integrity mismatch:", magic, "declared", total, "actual", blob.size);
+                            }
+                            return blob;
+                        });
+                    }
+                    return blob;
+                }).then(function (blob) {
                     var objectUrl = URL.createObjectURL(blob);
                     objectUrls.push(objectUrl);
                     return objectUrl;
@@ -1165,7 +1251,13 @@
                                             child.material.alphaTest = 0.015;
                                             child.material.depthWrite = true;
                                             child.material.depthTest = true;
-                                            child.material.side = THREE.DoubleSide;
+                                            // Weapons carry a cartoon outline as an
+                                            // inverted hull: a scaled-up shell whose
+                                            // faces point inward and map to a black
+                                            // texel. Rendering it double-sided draws
+                                            // that shell over the weapon, so the whole
+                                            // model turns black.
+                                            child.material.side = THREE.FrontSide;
                                         }
                                     });
                                     mountedWeaponParts.push(part);
@@ -1286,14 +1378,9 @@
                         }
                         if (!child.userData.facePart && loweredName.indexOf("l30_") === 0) {
                             var partName = child.name.slice(4);
-                            if (/^eye_/.test(partName)) {
-                                child.userData.facePart = { kind: "eye", name: partName };
-                            } else if (/^(?:eyebrow|eyebrrow)_/.test(partName)) {
-                                child.userData.facePart = { kind: "eyebrow", name: partName };
-                            } else if (/^mouth_/.test(partName)) {
-                                child.userData.facePart = { kind: "mouth", name: partName };
-                            } else if (partName === "cry" || /^(tere_|cheek_|cheeck_|sen_|shade|shadow)/.test(partName)) {
-                                child.userData.facePart = { kind: "overlay", name: partName };
+                            var partKind = classifyFacePart(partName);
+                            if (partKind) {
+                                child.userData.facePart = { kind: partKind, name: partName };
                             }
                         }
                         if (modelKind === "enemy" && child.isMesh) {
@@ -1315,8 +1402,11 @@
                             child.material.alphaTest = 0.01;
                             child.material.depthWrite = preview.depthWrite !== false;
                             child.material.depthTest = true;
-                            child.material.side = THREE.DoubleSide;
-                            child.renderOrder = Number(child.userData.renderOrder || (child.geometry && child.geometry.userData.renderOrder) || 0);
+                            // Weapons carry their cartoon outline as an inverted
+                            // hull mapped to a black texel, so they must cull
+                            // back faces or the shell hides the weapon.
+                            child.material.side = modelKind === "weapon" ? THREE.FrontSide : THREE.DoubleSide;
+                            child.renderOrder = resolveRenderOrder(child);
                             // Skinned vertices follow their bones, but frustum
                             // culling uses the node's bounding sphere, which
                             // stays at the skeleton origin for these exports —
@@ -1333,10 +1423,15 @@
                         }
                         var facePart = child.userData && child.userData.facePart;
                         if (facePart && faceParts[facePart.kind]) {
-                            faceParts[facePart.kind][facePart.name] = true;
+                            faceParts[facePart.kind][canonicalFacePartKey(facePart.name)] = facePart.name;
                         }
                     });
                     scene.add(modelObject);
+                    // Test hook for tools/check_faces.py, which asserts that a
+                    // model shows one eye/brow/mouth layer and no overlays.
+                    if (new URLSearchParams(window.location.search).get("debug") === "1") {
+                        window.__modelDebug = modelObject;
+                    }
                     mixer = new THREE.AnimationMixer(modelObject);
                     mountFaceControls();
                     // Face overlays are exported visible in some source bundles.
@@ -1593,13 +1688,23 @@
                 throw new Error("empty index");
             }
             renderDetailShell(model, spriteNames);
-            if (manifestState.error) {
+            if (manifestState.offline) {
+                setStatus(LOCAL_FILE_HINT, "error");
+            } else if (manifestState.error) {
                 setStatus("素材索引正常，但 WebGL 清单加载失败；可预览数量不会显示为错误的示例值", "error");
             } else {
                 setStatus("已载入 " + state.allModels.length.toLocaleString("zh-CN") + " 个模型条目 · 当前显示 " + spriteNames.length + " 个纹理", "ready");
             }
         }).catch(function () {
             if (requestId !== state.indexRequest) {
+                return;
+            }
+            // The sprite index lives on the official CDN, but the 3D preview
+            // only needs the local GLB. A missing index must not hide a model
+            // that is perfectly previewable.
+            if (MODEL_PREVIEWS[model.name]) {
+                renderDetailShell(model, []);
+                setStatus("纹理目录读取失败，仍可预览 3D 模型", "error");
                 return;
             }
             renderDetailError(model);
@@ -1662,8 +1767,17 @@
         }
     }
 
-    function loadPreviewManifest() {
-        return fetch(MODEL_MANIFEST_URL).then(function (response) {
+    // The manifest ships with the deployment and is rewritten whenever models
+    // are rebuilt; a read racing that rewrite (or a stale CDN edge) must not
+    // permanently disable every 3D preview, so retry a few times.
+    function loadPreviewManifest(attempt) {
+        if (IS_LOCAL_FILE) {
+            manifestState.offline = true;
+            manifestState.error = true;
+            return Promise.resolve();
+        }
+        attempt = attempt || 0;
+        return fetch(MODEL_MANIFEST_URL, { cache: "reload" }).then(function (response) {
             if (!response.ok) {
                 throw new Error("HTTP " + response.status);
             }
@@ -1680,6 +1794,13 @@
             });
             manifestState.loaded = true;
         }).catch(function () {
+            if (attempt < 2) {
+                return new Promise(function (resolve) {
+                    window.setTimeout(resolve, 1200 * (attempt + 1));
+                }).then(function () {
+                    return loadPreviewManifest(attempt + 1);
+                });
+            }
             manifestState.error = true;
         });
     }
@@ -1697,7 +1818,9 @@
             populateTitleFilter();
             updateCounts();
             applyFilter();
-            if (manifestState.error) {
+            if (manifestState.offline) {
+                setStatus("已载入 " + state.allModels.length.toLocaleString("zh-CN") + " 个索引条目 · " + LOCAL_FILE_HINT, "error");
+            } else if (manifestState.error) {
                 setStatus("已载入 " + state.allModels.length.toLocaleString("zh-CN") + " 个索引条目，但 WebGL 清单读取失败；请检查部署文件", "error");
             } else {
                 setStatus("索引与 WebGL 清单已载入 · " + state.allModels.length.toLocaleString("zh-CN") + " 个条目 · " + Object.keys(MODEL_PREVIEWS).length.toLocaleString("zh-CN") + " 个可预览", "ready");

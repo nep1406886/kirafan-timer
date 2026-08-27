@@ -24,9 +24,9 @@
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.0/css/bootstrap.min.css" integrity="sha384-9gVQ4dYFwwWSjIDZnLEWnxCjeSWFphJiwGPXr1jddIhOegiu1FwO5qRGvFXOdJZ4" crossorigin="anonymous">
     <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.1.0/js/bootstrap.min.js" integrity="sha384-uefMccjFJAIv6A+rW+L4AHf99KvxDjWSu1z9VI8SKNVmz4sk7buKt/6v9KI65qnm" crossorigin="anonymous"></script>
 
-    <link rel="stylesheet" type="text/css" href="style.css?v=20260818-3">
+    <link rel="stylesheet" type="text/css" href="style.css?v=20260826-1">
     <link rel="stylesheet" type="text/css" href="css/memorial.css?v=20260814-27">
-    <link rel="stylesheet" type="text/css" href="css/official-theme.css?v=20260818-2">
+    <link rel="stylesheet" type="text/css" href="css/official-theme.css?v=20260826-4">
 
     <link rel="icon" href="favicon.png">
 </head>
@@ -247,7 +247,23 @@
             </div>
         </div>
     </div>
-    <script type="text/javascript" src="app.js?v=20260818-26"></script>
+
+    <div class="bgm-player" id="bgmPlayer">
+        <div class="bgm-menu" id="bgmMenu" hidden>
+            <span class="bgm-menu-heading" aria-hidden="true">BGM / きららファンタジア</span>
+            <div class="bgm-tabs" id="bgmTabs" role="tablist" aria-label="BGM分组"></div>
+            <div class="bgm-menu-list" id="bgmMenuList" role="listbox" aria-label="选择BGM曲目"></div>
+        </div>
+        <div class="bgm-dock">
+            <span class="bgm-now" id="bgmNow" aria-live="polite"></span>
+            <button id="bgmMenuToggle" class="bgm-dock-button bgm-dock-list" type="button" aria-expanded="false" aria-controls="bgmMenu" aria-label="选择BGM曲目" title="选择BGM曲目">&#9835;</button>
+            <button id="bgmToggle" class="bgm-dock-button bgm-dock-play" type="button" aria-pressed="false" aria-label="播放BGM" title="播放 / 暂停BGM">
+                <span class="bgm-disc" aria-hidden="true"></span>
+            </button>
+        </div>
+    </div>
+
+    <script type="text/javascript" src="app.js?v=20260826-7"></script>
     <script defer src="https://events.vercount.one/js" onerror="window.handleVisitorCounterError && window.handleVisitorCounterError()"></script>
     <script>
         window.kirafanGiscus = {

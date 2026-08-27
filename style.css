@@ -213,6 +213,7 @@ main {
 .memory-grid-featured .memory-card > a {
     height: 300px;
     display: grid;
+    grid-template-rows: 100%;
     place-items: center;
 }
 

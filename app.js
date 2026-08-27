@@ -1367,6 +1367,7 @@ var vm = new Vue({
         initOffering();
         window.setTimeout(markCounterUnavailable, 6000);
         initGiscus();
+        initBgmPlayer();
     });
 
     function initGiscus() {
@@ -1393,5 +1394,324 @@ var vm = new Vue({
             script.dataset[key] = config[key];
         });
         target.appendChild(script);
+    }
+
+    var bgmTracks = [
+        { src: "audio/bgm/bgm_Prologue_0.mp3", title: "旅の始まり", note: "标题 / 登录画面", group: "title" },
+        { src: "audio/bgm/bgm_town_1_0.mp3", title: "里の刻は今日も流れて", note: "村庄 · 早晨", group: "town" },
+        { src: "audio/bgm/bgm_town_2_0.mp3", title: "変わらない一日", note: "村庄 · 白天", group: "town" },
+        { src: "audio/bgm/bgm_town_3_0.mp3", title: "灯りを囲んで", note: "村庄 · 夜晚", group: "town" },
+        { src: "audio/bgm/bgm_town_4_0.mp3", title: "トロピカルデイズ", note: "村庄 · 夏日", group: "town" },
+        { src: "audio/bgm/bgm_town_5_0.mp3", title: "お菓子の用意を忘れずに", note: "村庄 · 万圣节", group: "town" },
+        { src: "audio/bgm/bgm_town_shougatu_0.mp3", title: "一富士二鷹三茄子", note: "村庄 · 正月", group: "town" },
+        { src: "audio/bgm/bgm_town_xmas_0.mp3", title: "街は一面雪景色", note: "村庄 · 圣诞节", group: "town" },
+        { src: "audio/bgm/bgm_questselect_0.mp3", title: "はるかなる旅路", note: "任务选择", group: "quest" },
+        { src: "audio/bgm/bgm_questselect_2_0.mp3", title: "神殿", note: "任务 · 神殿(推测)", group: "quest" },
+        { src: "audio/bgm/bgm_questselect_3_0.mp3", title: "クエストBGM·3", note: "任务场景(未确认曲名)", group: "quest" },
+        { src: "audio/bgm/bgm_gacha_0.mp3", title: "召喚の館", note: "召唤之馆 · 大厅(gacha.js)", group: "gacha" },
+        { src: "audio/bgm/bgm_gachaplay_0.mp3", title: "出会いの予感", note: "召唤卡面演出(gacha.js)", group: "gacha" },
+        { src: "audio/bgm/bgm_battle_1_0.mp3", title: "バトル -いつものように-", note: "普通战斗", group: "battle" },
+        { src: "audio/bgm/bgm_battle_2_0.mp3", title: "バトルBGM·2", note: "战斗(未确认曲名)", group: "battle" },
+        { src: "audio/bgm/bgm_battle_3_0.mp3", title: "バトルBGM·3", note: "战斗(未确认曲名)", group: "battle" },
+        { src: "audio/bgm/bgm_battle_4_0.mp3", title: "バトルBGM·4", note: "战斗(未确认曲名)", group: "battle" },
+        { src: "audio/bgm/bgm_battle_5_0.mp3", title: "バトル -筆頭神官アルシーヴ-", note: "战斗 · 阿尔西夫", group: "battle" },
+        { src: "audio/bgm/bgm_battle_6_0.mp3", title: "バトル -けいおん!-", note: "战斗 · 轻音部", group: "battle" },
+        { src: "audio/bgm/bgm_battle_7_0.mp3", title: "バトル -サマーバケーション-", note: "战斗 · 夏日", group: "battle" },
+        { src: "audio/bgm/bgm_battle_8_0.mp3", title: "バトル -ゴーストパーティ-", note: "战斗 · 万圣节", group: "battle" },
+        { src: "audio/bgm/bgm_battle_9_0.mp3", title: "バトルBGM·9", note: "战斗(未确认曲名)", group: "battle" },
+        { src: "audio/bgm/bgm_battle_10_0.mp3", title: "バトルBGM·10", note: "战斗(未确认曲名)", group: "battle" },
+        { src: "audio/bgm/bgm_battle_11_0.mp3", title: "バトルBGM·11", note: "战斗(未确认曲名)", group: "battle" },
+        { src: "audio/bgm/bgm_battle_12_0.mp3", title: "バトルBGM·12", note: "战斗(未确认曲名)", group: "battle" },
+        { src: "audio/bgm/bgm_battle_13_0.mp3", title: "バトルBGM·13", note: "战斗(未确认曲名)", group: "battle" },
+        { src: "audio/bgm/bgm_battle_shougatu_0.mp3", title: "バトル -振袖を揺らして-", note: "战斗 · 正月", group: "battle" },
+        { src: "audio/bgm/bgm_battle_win_0.mp3", title: "バトル -勝利-", note: "战斗胜利", group: "battle" },
+        { src: "audio/bgm/bgm_battle_xmas_0.mp3", title: "バトル -ホワイトクリスマス-", note: "战斗 · 圣诞节", group: "battle" },
+        { src: "audio/bgm/bgm_adv_1_0.mp3", title: "ADV BGM·1", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_2_0.mp3", title: "ADV BGM·2", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_3_0.mp3", title: "ADV BGM·3", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_4_0.mp3", title: "ADV BGM·4", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_5_0.mp3", title: "ADV BGM·5", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_6_0.mp3", title: "ADV BGM·6", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_7_0.mp3", title: "張り詰めた空気", note: "剧情 · 紧张(推测)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_8_0.mp3", title: "ADV BGM·8", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_9_0.mp3", title: "ADV BGM·9", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_10_0.mp3", title: "緊急事態!", note: "剧情 · 紧急(推测)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_11_0.mp3", title: "ADV BGM·11", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_12_0.mp3", title: "ここは任せて!", note: "剧情 · 可靠(确认)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_13_0.mp3", title: "ADV BGM·13", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_14_0.mp3", title: "ADV BGM·14", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_15_0.mp3", title: "ADV BGM·15", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_16_0.mp3", title: "ADV BGM·16", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_17_0.mp3", title: "ADV BGM·17", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_18_0.mp3", title: "ADV BGM·18", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_19_0.mp3", title: "ADV BGM·19", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_20_0.mp3", title: "ADV BGM·20", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_21_0.mp3", title: "ADV BGM·21", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_22_0.mp3", title: "ADV BGM·22", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_23_0.mp3", title: "ADV BGM·23", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_25_0.mp3", title: "ADV BGM·25", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_26_0.mp3", title: "ADV BGM·26", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_27_0.mp3", title: "七賢者のテーマ", note: "剧情 · 七贤者(推测)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_28_0.mp3", title: "ADV BGM·28", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_29_0.mp3", title: "ADV BGM·29", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_30_0.mp3", title: "ADV BGM·30", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_31_0.mp3", title: "ADV BGM·31", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_32_0.mp3", title: "ADV BGM·32", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_33_0.mp3", title: "ADV BGM·33", note: "剧情(未确认曲名)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_shougatu_0.mp3", title: "謹賀新年エトワリア!", note: "剧情 · 正月(推测)", group: "adv" },
+        { src: "audio/bgm/bgm_adv_xmas_0.mp3", title: "ADV BGM·xmas", note: "剧情 · 圣诞节(未确认)", group: "adv" },
+        { src: "audio/bgm/bgm_4_common_0.mp3", title: "これがわたしのとっておき", note: "必杀技 · 星4共通", group: "unique" },
+        { src: "audio/bgm/bgm_5_alchemist_0.mp3", title: "これがわたしのとっておき -アルケミスト-", note: "必杀技 · 炼金术师", group: "unique" },
+        { src: "audio/bgm/bgm_5_fighter_0.mp3", title: "これがわたしのとっておき -せんし-", note: "必杀技 · 战士", group: "unique" },
+        { src: "audio/bgm/bgm_5_knight_0.mp3", title: "これがわたしのとっておき -ナイト-", note: "必杀技 · 骑士", group: "unique" },
+        { src: "audio/bgm/bgm_5_magician_0.mp3", title: "これがわたしのとっておき -まほうつかい-", note: "必杀技 · 魔法使", group: "unique" },
+        { src: "audio/bgm/bgm_5_priest_0.mp3", title: "これがわたしのとっておき -そうりょ-", note: "必杀技 · 僧侣", group: "unique" }
+    ];
+
+    function initBgmPlayer() {
+        var player = document.getElementById("bgmPlayer");
+        var toggle = document.getElementById("bgmToggle");
+        var menuToggle = document.getElementById("bgmMenuToggle");
+        var menu = document.getElementById("bgmMenu");
+        var list = document.getElementById("bgmMenuList");
+        var nowLabel = document.getElementById("bgmNow");
+        if (!player || !toggle || !menuToggle || !menu || !list || !nowLabel) {
+            return;
+        }
+
+        var audio = new Audio();
+        audio.loop = true;
+        audio.volume = 0.4;
+        audio.preload = "none";
+
+        var enabled = readBgmPreference("kirafan-bgm-enabled", true);
+        var currentIndex = readBgmPreference("kirafan-bgm-track-v2", 0);
+        if (currentIndex < 0 || currentIndex >= bgmTracks.length) {
+            currentIndex = 0;
+        }
+        var loadedIndex = -1;
+
+        var bgmGroups = [
+            { key: "all", label: "全部" },
+            { key: "title", label: "标题" },
+            { key: "town", label: "村庄" },
+            { key: "quest", label: "任务" },
+            { key: "gacha", label: "召唤" },
+            { key: "battle", label: "战斗" },
+            { key: "adv", label: "剧情" },
+            { key: "unique", label: "必杀" }
+        ];
+        var groupLabels = {
+            title: "タイトル / 标题",
+            town: "里 / 村庄",
+            quest: "クエスト / 任务",
+            gacha: "召喚 / 召唤",
+            battle: "バトル / 战斗",
+            adv: "ADV / 剧情",
+            unique: "とっておき / 必杀技"
+        };
+        var activeGroup = "all";
+
+        buildBgmMenu();
+
+        if (enabled) {
+            loadTrack();
+            var request = audio.play();
+            if (request && typeof request.catch === "function") {
+                request.catch(function () { /* waits for the first user gesture */ });
+            }
+            document.addEventListener("pointerdown", unlockBgm);
+            document.addEventListener("keydown", unlockBgm);
+        }
+        syncBgmPlayer();
+
+        function readBgmPreference(key, fallback) {
+            try {
+                var raw = window.localStorage.getItem(key);
+                if (raw === null) {
+                    return fallback;
+                }
+                if (typeof fallback === "boolean") {
+                    return raw === "on";
+                }
+                var parsed = parseInt(raw, 10);
+                return isNaN(parsed) ? fallback : parsed;
+            } catch (error) {
+                return fallback;
+            }
+        }
+
+        function writeBgmPreference(key, value) {
+            try {
+                window.localStorage.setItem(key, value);
+            } catch (error) { /* storage unavailable */ }
+        }
+
+        function buildTabs() {
+            var tabs = document.getElementById("bgmTabs");
+            if (!tabs) {
+                return;
+            }
+            tabs.innerHTML = "";
+            bgmGroups.forEach(function (g) {
+                var btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "bgm-tab";
+                btn.textContent = g.label;
+                btn.setAttribute("role", "tab");
+                btn.addEventListener("click", function () {
+                    activeGroup = g.key;
+                    updateTabs();
+                    renderList();
+                });
+                tabs.appendChild(btn);
+            });
+            updateTabs();
+        }
+
+        function updateTabs() {
+            var tabs = document.getElementById("bgmTabs");
+            if (!tabs) {
+                return;
+            }
+            var btns = tabs.querySelectorAll(".bgm-tab");
+            bgmGroups.forEach(function (g, i) {
+                var btn = btns[i];
+                if (!btn) {
+                    return;
+                }
+                var on = g.key === activeGroup;
+                btn.classList.toggle("is-active", on);
+                btn.setAttribute("aria-selected", on ? "true" : "false");
+            });
+        }
+
+        function renderList() {
+            list.innerHTML = "";
+            var pendingGroup = null;
+            bgmTracks.forEach(function (track, index) {
+                if (activeGroup !== "all" && track.group !== activeGroup) {
+                    return;
+                }
+                if (activeGroup === "all" && track.group !== pendingGroup) {
+                    pendingGroup = track.group;
+                    var header = document.createElement("div");
+                    header.className = "bgm-group-label";
+                    header.textContent = groupLabels[track.group] || track.group;
+                    list.appendChild(header);
+                }
+                var item = document.createElement("button");
+                item.type = "button";
+                item.className = "bgm-track" + (index === currentIndex ? " is-active" : "");
+                item.setAttribute("role", "option");
+                item.setAttribute("data-track-index", String(index));
+                item.setAttribute("aria-selected", index === currentIndex ? "true" : "false");
+                var title = document.createElement("span");
+                title.textContent = track.title;
+                var note = document.createElement("small");
+                note.textContent = track.note;
+                item.appendChild(title);
+                item.appendChild(note);
+                item.addEventListener("click", function () {
+                    selectBgmTrack(index);
+                });
+                list.appendChild(item);
+            });
+        }
+
+        function buildBgmMenu() {
+            buildTabs();
+            renderList();
+        }
+
+        function loadTrack() {
+            if (loadedIndex !== currentIndex) {
+                loadedIndex = currentIndex;
+                audio.src = bgmTracks[currentIndex].src;
+            }
+        }
+
+        function playBgm() {
+            loadTrack();
+            var request = audio.play();
+            if (request && typeof request.catch === "function") {
+                request.catch(function () { /* gesture required */ });
+            }
+        }
+
+        function selectBgmTrack(index) {
+            currentIndex = index;
+            writeBgmPreference("kirafan-bgm-track-v2", String(index));
+            enabled = true;
+            writeBgmPreference("kirafan-bgm-enabled", "on");
+            playBgm();
+            syncBgmPlayer();
+        }
+
+        function unlockBgm() {
+            document.removeEventListener("pointerdown", unlockBgm);
+            document.removeEventListener("keydown", unlockBgm);
+            if (enabled) {
+                playBgm();
+                syncBgmPlayer();
+            }
+        }
+
+        function setBgmMenuOpen(open) {
+            menu.hidden = !open;
+            menuToggle.setAttribute("aria-expanded", open ? "true" : "false");
+            if (open) {
+                renderList();
+            }
+        }
+
+        function syncBgmPlayer() {
+            var playing = enabled && !audio.paused;
+            player.classList.toggle("is-playing", playing);
+            player.classList.toggle("is-muted", !enabled);
+            toggle.setAttribute("aria-pressed", playing ? "true" : "false");
+            toggle.setAttribute("aria-label", playing ? "暂停BGM" : "播放BGM");
+            nowLabel.textContent = bgmTracks[currentIndex].title;
+            Array.prototype.forEach.call(list.querySelectorAll(".bgm-track"), function (item) {
+                var trackIndex = parseInt(item.getAttribute("data-track-index"), 10);
+                var on = trackIndex === currentIndex;
+                item.classList.toggle("is-active", on);
+                item.setAttribute("aria-selected", on ? "true" : "false");
+            });
+        }
+
+        toggle.addEventListener("click", function () {
+            if (enabled && audio.paused) {
+                playBgm();
+            } else {
+                enabled = !enabled;
+                writeBgmPreference("kirafan-bgm-enabled", enabled ? "on" : "off");
+                if (enabled) {
+                    playBgm();
+                } else {
+                    audio.pause();
+                }
+            }
+            syncBgmPlayer();
+        });
+
+        menuToggle.addEventListener("click", function () {
+            setBgmMenuOpen(menu.hidden);
+        });
+
+        document.addEventListener("click", function (event) {
+            if (!menu.hidden && !player.contains(event.target)) {
+                setBgmMenuOpen(false);
+            }
+        });
+
+        document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape" && !menu.hidden) {
+                setBgmMenuOpen(false);
+            }
+        });
+
+        audio.addEventListener("play", syncBgmPlayer);
+        audio.addEventListener("pause", syncBgmPlayer);
     }
 })();

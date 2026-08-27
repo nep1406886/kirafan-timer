@@ -3,3 +3,6 @@ test.html
 .codex-tmp/
 __pycache__/
 asset/models/class-actions/*/actions.glb.gz
+__face/
+__probe/
+__shots/

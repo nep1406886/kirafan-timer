@@ -95,8 +95,10 @@ def optimize_model(output: Path, gltfpack: Path) -> None:
                 str(gltfpack),
                 "-i", str(output),
                 "-o", str(optimized),
+                # Quantization must stay enabled: gltfpack's -noq path emits
+                # NaN vertices for some meshes once meshopt compression runs,
+                # which rendered weapons black and punched holes in models.
                 "-c",
-                "-noq",
                 "-af", "0",
                 "-ac",
                 "-ke",
