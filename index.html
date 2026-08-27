@@ -7,22 +7,24 @@
     <meta name="description" content="闪耀幻想曲停服纪念与时间记录页面">
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <script src="https://momentjs.com/downloads/moment-with-locales.js">
-    </script>
-    <script src="https://momentjs.com/downloads/moment-timezone-with-data-10-year-range.js"></script>
+    <!-- Vendored locally: the CDN copies added ~10s of blocking round trips
+         (momentjs.com alone was 2.9s for 632 KB) and made the page depend on
+         five third parties. Load order is unchanged. -->
+    <script src="js/moment-with-locales.js"></script>
+    <script src="js/moment-timezone-with-data-10-year-range.min.js"></script>
 
-    <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js" integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo" crossorigin="anonymous"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.0/umd/popper.min.js" integrity="sha384-cs/chFZiN24E4KMATLdqdvsezGxaGsi4hLGOzlXwp5UZB1LY//20VyM2taTB4QvJ" crossorigin="anonymous"></script>
+    <script src="js/jquery-3.3.1.slim.min.js"></script>
+    <script src="js/popper.min.js"></script>
 
     <script type="text/javascript" src="data.js?v=20260813-5"></script>
     <script type="text/javascript" src="asset/shutdown-artworks/artworks.js?v=20260813-5"></script>
     <script type="text/javascript" src="asset/original-characters.js?v=20260813-7"></script>
-    <script src="https://cdn.jsdelivr.net/npm/vue@2.5.17/dist/vue.min.js"></script>
+    <script src="js/vue.min.js"></script>
     <script type="text/javascript" src="components.js?v=20260813-5"></script>
 
     <link rel="preload" as="image" href="imgs/op1900.jpg">
-    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.0/css/bootstrap.min.css" integrity="sha384-9gVQ4dYFwwWSjIDZnLEWnxCjeSWFphJiwGPXr1jddIhOegiu1FwO5qRGvFXOdJZ4" crossorigin="anonymous">
-    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.1.0/js/bootstrap.min.js" integrity="sha384-uefMccjFJAIv6A+rW+L4AHf99KvxDjWSu1z9VI8SKNVmz4sk7buKt/6v9KI65qnm" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="css/bootstrap.min.css">
+    <script src="js/bootstrap.min.js"></script>
 
     <link rel="stylesheet" type="text/css" href="style.css?v=20260826-1">
     <link rel="stylesheet" type="text/css" href="css/memorial.css?v=20260814-27">
@@ -264,7 +266,10 @@
     </div>
 
     <script type="text/javascript" src="app.js?v=20260826-7"></script>
-    <script defer src="https://events.vercount.one/js" onerror="window.handleVisitorCounterError && window.handleVisitorCounterError()"></script>
+    <!-- async, not defer: a deferred script still runs before
+         DOMContentLoaded, and this counter took 1.2s — which delayed every
+         DOMContentLoaded handler, including the BGM player's init. -->
+    <script async src="https://events.vercount.one/js" onerror="window.handleVisitorCounterError && window.handleVisitorCounterError()"></script>
     <script>
         window.kirafanGiscus = {
             repo: "nep1406886/kirafan-timer",

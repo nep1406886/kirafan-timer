@@ -804,7 +804,24 @@
             audio.volume = volume;
             var playback = audio.play();
             if (playback && typeof playback.catch === "function") {
-                return playback.then(function () { return true; }).catch(function () { return false; });
+                return playback.then(function () { return true; }).catch(function (error) {
+                    // Shared elements are reused across pulls, so a fresh pull
+                    // can start (and pause) the same element while the previous
+                    // play is still settling. The browser then rejects the new
+                    // request with "interrupted by a new load request" and the
+                    // cue (Claire's result voice) is silently lost. Retry once
+                    // on the next tick instead of swallowing it.
+                    if (error && (error.name === "NotAllowedError" || error.name === "AbortError")) {
+                        var retry = audio;
+                        retry.currentTime = 0;
+                        var retried = retry.play();
+                        if (retried && typeof retried.catch === "function") {
+                            return retried.then(function () { return true; }).catch(function () { return false; });
+                        }
+                        return true;
+                    }
+                    return false;
+                });
             }
             return Promise.resolve(true);
         } catch (error) {

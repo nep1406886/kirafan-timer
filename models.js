@@ -444,6 +444,26 @@
         return "";
     }
 
+    // gltfpack strips mesh names, so GLTFLoader falls back to "mesh_<index>"
+    // and the authored name (body_obj, weapon_wand_obj, L30_eye_A_1) survives
+    // only on the wrapper node it builds around the mesh. Every name-based rule
+    // has to look there too, or it silently matches nothing — and worse, a rule
+    // ending in a digit matches the generated names by accident.
+    var GENERATED_MESH_NAME = /^mesh_\d+$/;
+
+    function resolveNodeName(node) {
+        var name = node.name || "";
+        if (name && !GENERATED_MESH_NAME.test(name)) {
+            return name;
+        }
+        var parent = node.parent;
+        var parentName = parent && parent.name ? parent.name : "";
+        if (parentName && !GENERATED_MESH_NAME.test(parentName)) {
+            return parentName;
+        }
+        return name;
+    }
+
     function resolveRenderOrder(mesh) {
         var candidates = [mesh, mesh.parent];
         for (var i = 0; i < candidates.length; i++) {
@@ -526,6 +546,7 @@
             var viewInteracted = false;
             var faceParts = { eye: {}, eyebrow: {}, mouth: {}, overlay: {} };
             var enemyVisualParts = {};
+            var enemyVariantParts = [];
             var faceSelects = {};
             // Letters index the head atlas layers, but their meaning is not
             // stable across characters and most bundles ship only a subset, so
@@ -616,11 +637,39 @@
                 }
             }
 
+            // Box3.setFromObject reads each mesh's bind-pose geometry bounds and
+            // ignores skinning, so a posed character measured 0.76 tall when it
+            // actually reaches 1.03 and the framing cut off the head. Sample
+            // skinned vertices through the bone matrices instead.
+            function measureModelBounds() {
+                var bounds = new THREE.Box3();
+                var vertex = new THREE.Vector3();
+                modelObject.traverse(function (node) {
+                    if (!node.isMesh || !node.visible || !node.geometry) {
+                        return;
+                    }
+                    var position = node.geometry.attributes && node.geometry.attributes.position;
+                    if (!position || !position.count) {
+                        return;
+                    }
+                    var step = Math.max(1, Math.floor(position.count / 240));
+                    for (var i = 0; i < position.count; i += step) {
+                        vertex.fromBufferAttribute(position, i);
+                        if (node.isSkinnedMesh && node.applyBoneTransform) {
+                            node.applyBoneTransform(i, vertex);
+                        }
+                        node.localToWorld(vertex);
+                        bounds.expandByPoint(vertex);
+                    }
+                });
+                return bounds.isEmpty() ? new THREE.Box3().setFromObject(modelObject) : bounds;
+            }
+
             function fitModelView(force) {
                 if (!force && viewInteracted) {
                     return;
                 }
-                var bounds = new THREE.Box3().setFromObject(modelObject);
+                var bounds = measureModelBounds();
                 if (bounds.isEmpty()) {
                     return;
                 }
@@ -748,17 +797,63 @@
                 var candidates = ENEMY_DEFAULT_STATES.filter(function (state) {
                     return states[state];
                 });
-                return candidates[0] || Object.keys(states)[0];
+                // The unsuffixed state is named "" and ranks first, but it is
+                // falsy — `||` skipped it and fell through to whatever the
+                // traverse happened to reach first, which showed angry eyes on
+                // idle.
+                return candidates.length ? candidates[0] : Object.keys(states)[0];
             }
 
-            function isEnemyAlternatePart(name) {
-                var lowered = String(name || "").toLowerCase();
-                return /^side_/.test(lowered)
-                    || /^hand_[lr]\d/.test(lowered)
-                    || /^weapon_(?:close|[2-9])/.test(lowered)
-                    || /_(?:open|grip|close|close_half)(?:_|$)/.test(lowered)
-                    || /_(?:[2-9])(?:_[ab])?(_obj)?$/.test(lowered)
-                    || /_b(_obj)?$/.test(lowered);
+            // Enemy bundles ship grip/pose alternates of the same limb as
+            // sibling nodes: hand_R_obj + hand_R_2_obj, hand_R_A/B/C_obj,
+            // wing_L_obj + wing_L_open_obj, weapon_wand_obj + weapon_wand_2_obj.
+            // Hiding anything that merely *looks* like a variant deletes unique
+            // geometry (bodu_B_obj with no bodu_obj is the only torso some
+            // models have), so a node is only hidden when a sibling sharing its
+            // base name is present and ranks ahead of it.
+
+            function enemyVariantKey(name) {
+                var base = String(name || "").toLowerCase().replace(/_obj$/, "");
+                var rank = 0;
+                // Suffixes stack (hand_R_A_2), so peel every trailing token and
+                // keep the worst rank: a plain limb outranks _A, which outranks
+                // _2, which outranks an _open/_grip pose.
+                for (;;) {
+                    var match = /_(?:([a-c])|([2-9])|(open|close_half|close|grip))$/.exec(base);
+                    if (!match) {
+                        break;
+                    }
+                    var tokenRank = match[1]
+                        ? match[1].charCodeAt(0) - 96
+                        : (match[2] ? 10 + Number(match[2]) : 20);
+                    rank = Math.max(rank, tokenRank);
+                    base = base.slice(0, match.index);
+                }
+                return { base: base, rank: rank };
+            }
+
+            function hideEnemyDuplicateVariants() {
+                var groups = {};
+                enemyVariantParts.forEach(function (entry) {
+                    var key = enemyVariantKey(entry.name);
+                    entry.rank = key.rank;
+                    groups[key.base] = groups[key.base] || [];
+                    groups[key.base].push(entry);
+                });
+                Object.keys(groups).forEach(function (base) {
+                    var members = groups[base];
+                    if (members.length < 2) {
+                        return;
+                    }
+                    var best = members.reduce(function (winner, entry) {
+                        return entry.rank < winner.rank ? entry : winner;
+                    }, members[0]);
+                    members.forEach(function (entry) {
+                        if (entry !== best) {
+                            entry.node.visible = false;
+                        }
+                    });
+                });
             }
 
             function applyEnemyVisualState(action) {
@@ -1384,13 +1479,19 @@
                             }
                         }
                         if (modelKind === "enemy" && child.isMesh) {
-                            var enemyPart = classifyEnemyVisualPart(child.name);
+                            var enemyName = resolveNodeName(child);
+                            var enemyPart = classifyEnemyVisualPart(enemyName);
                             if (enemyPart) {
                                 enemyVisualParts[enemyPart.group] = enemyVisualParts[enemyPart.group] || {};
                                 enemyVisualParts[enemyPart.group][enemyPart.state] = enemyVisualParts[enemyPart.group][enemyPart.state] || [];
                                 enemyVisualParts[enemyPart.group][enemyPart.state].push(child);
-                            } else if (isEnemyAlternatePart(child.name)) {
+                            } else if (/^side_/i.test(enemyName)) {
+                                // SIDE_* is a complete duplicate set for the
+                                // side-facing battle pose; the viewer always
+                                // faces the camera.
                                 child.visible = false;
+                            } else {
+                                enemyVariantParts.push({ node: child, name: enemyName });
                             }
                         }
                         if (child.isMesh && child.material) {
@@ -1438,6 +1539,7 @@
                     // Apply the normal preset before the asynchronous class action
                     // download so shade/debuff layers never flash during loading.
                     selectFace("normal", true);
+                    hideEnemyDuplicateVariants();
                     applyEnemyVisualState("idle");
                     gltf.animations.forEach(function (clip) {
                         clipByName[clip.name] = clip;
