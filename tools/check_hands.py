@@ -30,6 +30,16 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 from audit_models import read_gltf_json  # noqa: E402
 
+# One source of truth for "this mesh is a hand", interpolated into the probe below
+# and compiled for the disk-side discovery pass.  Keeping two copies is what let the
+# boundary fix land in the probe while discovery still matched "hand" as a substring,
+# so weapon_handle_obj selected a model that then reported 0/0 hands as a pass.
+HAND_PATTERN = r"(?:^|_)hand(?:_|$)|(?:^|_)finger(?:_|$)"
+HAND_RE = re.compile(HAND_PATTERN, re.I)
+# The duplicate side-facing set and non-exported head directions are meant to be
+# suppressed, so they must not count as geometry that failed to reach the screen.
+SKIP_RE = re.compile(r"^(?:side|l60|r30|r60)_", re.I)
+
 PROBE = """() => {
   const root = window.__modelDebug;
   if (!root) return {error: 'no model root'};
@@ -55,14 +65,15 @@ PROBE = """() => {
     };
     // "hand" has to sit on a word boundary: weapon_handle_obj is a weapon handle,
     // not a hand, and a substring test counts it as one and then reports it missing.
-    if (/(?:^|_)hand(?:_|$)|(?:^|_)finger(?:_|$)/.test(name)) hands.push(entry);
+    // Pattern comes from HAND_PATTERN so this cannot drift from the disk-side pass.
+    if (/__HAND_RE__/.test(name)) hands.push(entry);
     else if (name.includes('arm') || name.includes('sleeve')) arms.push(entry);
     // Every mesh name, so the caller can prove the viewer mounted the model it
     // asked for rather than falling back to its default one.
     all.push(raw);
   });
   return {hands, arms, all};
-}"""
+}""".replace("__HAND_RE__", HAND_PATTERN)
 
 
 def expected_meshes(name: str) -> set[str]:
@@ -81,9 +92,8 @@ def expected_meshes(name: str) -> set[str]:
         document = read_gltf_json(path)
     except Exception:  # noqa: BLE001
         return set()
-    skip = re.compile(r"^(?:side|l60|r30|r60)_", re.I)
     return {node["name"] for node in document.get("nodes", [])
-            if "mesh" in node and node.get("name") and not skip.match(node["name"])}
+            if "mesh" in node and node.get("name") and not SKIP_RE.match(node["name"])}
 
 
 def normalise(name: str) -> str:
@@ -117,8 +127,12 @@ def models_with_hands() -> list[str]:
         except Exception:
             continue
         for node in document.get("nodes", []):
-            name = (node.get("name") or "").lower()
-            if "mesh" in node and "hand" in name and not name.startswith("side_"):
+            name = node.get("name") or ""
+            # Same boundary rule as the probe: a substring test selects the six
+            # model_en_134xx enemies whose only "hand" mesh is weapon_handle_obj,
+            # which the probe then correctly finds no hands on -- reporting 0/0
+            # as a pass and padding the denominator with models it never checked.
+            if "mesh" in node and HAND_RE.search(name) and not SKIP_RE.match(name):
                 found.append(Path(key).stem)
                 break
     return found
@@ -200,6 +214,19 @@ def main() -> int:
                 if re.search(r"(?:^|_)r(?:_|$)|_r_", lowered):
                     return "R"
                 return "?"
+
+            # Discovery selected this model because the GLB has hand geometry, so a
+            # probe that finds none means the scene disagrees with the file -- not a
+            # model with nothing to check.  Without this an empty list leaves `dark`
+            # empty and prints "ok 0/0", which is how six weapon-handle enemies
+            # counted as passes.
+            if not result["hands"]:
+                hands_on_disk = sorted(n for n in wanted if HAND_RE.search(n))
+                print(f"[{index}/{len(names)}] FAIL {name:<18} "
+                      f"no hand mesh reached the scene at all; "
+                      f"GLB has {hands_on_disk[:3]}")
+                failures += 1
+                continue
 
             by_side: dict[str, list[dict]] = {}
             for entry in result["hands"]:
