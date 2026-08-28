@@ -140,6 +140,8 @@ main { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 54
 .model-detail-actions a:hover, .model-error-state a:hover, .model-error-state button:hover { background: #f8e9ea; }
 .model-meta { display: flex; flex-wrap: wrap; gap: 7px 24px; margin: 18px 0; padding: 10px 12px; border-left: 3px solid var(--model-gold); background: #faf3ed; color: var(--model-muted); font-size: 0.72rem; }
 .model-meta strong { margin-left: 4px; color: var(--model-ink); font-variant-numeric: tabular-nums; }
+/* Stars read as decoration, not data, unless they are tinted and spaced. */
+.model-meta strong.model-rarity { color: #c48a12; letter-spacing: 1px; }
 .model-3d-card { margin-bottom: 22px; overflow: hidden; border: 1px solid #d8c5ca; border-radius: 6px; background: #251f23; color: #fff; box-shadow: 0 14px 30px rgba(45,32,39,0.14); }
 .model-3d-toolbar { min-height: 62px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 10px 14px; border-bottom: 1px solid rgba(255,255,255,0.13); }
 .model-3d-toolbar > div:first-child { display: flex; align-items: baseline; flex-wrap: wrap; gap: 7px 10px; }

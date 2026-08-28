@@ -138,7 +138,7 @@ def main() -> int:
         lost = set(baseline.get("models", {})) - set(models)
         if lost:
             problems.append(f"{len(lost)} models disappeared, e.g. {sorted(lost)[:3]}")
-        for name in ("classActions", "facialActions", "skillActions"):
+        for name in ("classActions", "facialActions", "skillActions", "rarity"):
             was, now = baseline.get(name), manifest.get(name)
             if was and not now:
                 problems.append(f"top-level key '{name}' was dropped")

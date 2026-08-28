@@ -28098,5 +28098,6 @@
         "skill"
       ]
     }
-  }
+  },
+  "rarity": "asset/models/rarity.json?v=1787959524"
 }

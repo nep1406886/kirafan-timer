@@ -13,6 +13,16 @@
     // KiB each and only matter once someone asks for them. Written by
     // tools/build_skill_action_catalog.py.
     var SKILL_ACTION_PREVIEWS = {};
+    // Per-model rarity and とっておき ownership, keyed by the numeric model id.
+    // Written by tools/build_rarity_table.py out of CharacterList.m_Rare and
+    // SkillList_PL.m_UniqueSkillScene. The game only grants an ultimate from ★4
+    // up, and a skill.glb.gz exists for some models that never had one, so the
+    // catalog cannot be the gate -- this table is.
+    var MODEL_RARITY = {};
+    // ★4 is the lowest rarity the game gives a とっておき to. Keep in step with
+    // TOTTEOKI_MIN_RARITY in tools/build_rarity_table.py.
+    var TOTTEOKI_MIN_RARITY = 4;
+    var RARITY_TABLE_URL = "asset/models/rarity.json?v=20260829-1";
     var PLAYER_MODEL_META = {};
     var MODEL_TITLES = [];
     var manifestState = { loaded: false, error: false, offline: false };
@@ -165,6 +175,30 @@
     function modelMetadata(model) {
         var match = /^model\/player\/model_pl_(\d+)\.muast$/.exec(model.name);
         return match ? PLAYER_MODEL_META[match[1]] || null : null;
+    }
+
+    // Accepts anything that carries the id: a database entry name, or the
+    // preview's file path (asset/models/model_pl_<id>/model.glb.gz).
+    function rarityOf(source) {
+        var match = /model_pl_(\d+)/.exec(String(source || ""));
+        return (match && MODEL_RARITY[match[1]]) || null;
+    }
+
+    function hasTotteoki(source) {
+        var entry = rarityOf(source);
+        if (!entry) {
+            // No table entry means no rarity claim either way. Enemies and
+            // weapons land here, and they have no とっておき to gate.
+            return false;
+        }
+        return entry.totteoki === true;
+    }
+
+    function rarityStars(entry) {
+        if (!entry || !Number.isFinite(entry.rarity)) {
+            return "";
+        }
+        return new Array(entry.rarity + 1).join("★");
     }
 
     function bilingualLabel(chinese, japanese) {
@@ -435,8 +469,15 @@
         var identityMarkup = metadata
             ? "<span>作品 <strong>" + escapeHtml(bilingualLabel(metadata.titleZh, metadata.title)) + "</strong></span><span>角色 <strong>" + escapeHtml(bilingualLabel(metadata.characterZh, metadata.character)) + "</strong></span>"
             : "";
+        // Say the rarity out loud: it decides whether 必杀演出 appears at all, and
+        // a missing group is otherwise indistinguishable from a broken catalog.
+        var rarityEntry = rarityOf(model.name);
+        var rarityMarkup = rarityEntry
+            ? "<span>稀有度 <strong class='model-rarity'>" + escapeHtml(rarityStars(rarityEntry)) + "</strong></span>"
+                + "<span>とっておき <strong>" + (rarityEntry.totteoki ? "有" : "无（★3 无大招）") + "</strong></span>"
+            : "";
         elements.detail.innerHTML = "<header class='model-detail-header'><div><span class='models-eyebrow'>" + escapeHtml(parts.kind.toUpperCase()) + " MODEL</span><h2 id='modelDetailTitle'>" + escapeHtml(parts.file.replace(/\.muast$/i, "")) + "</h2><p class='model-detail-path'>" + escapeHtml(model.name) + "</p></div><div class='model-detail-actions'><a href='" + detailUrl(model) + "' target='_blank' rel='noopener noreferrer'>官方详情 ↗</a><a href='" + rawAssetUrl(model) + "' target='_blank' rel='noopener noreferrer'>原始包 ↗</a></div></header>" +
-            "<div class='model-meta'>" + identityMarkup + "<span>包大小 <strong>" + formatSize(model.size) + "</strong></span><span>可视纹理 <strong>" + spriteCount + " 个</strong></span><span>Bucket <strong>" + escapeHtml(bucketFor(model)) + "</strong></span></div>" +
+            "<div class='model-meta'>" + identityMarkup + rarityMarkup + "<span>包大小 <strong>" + formatSize(model.size) + "</strong></span><span>可视纹理 <strong>" + spriteCount + " 个</strong></span><span>Bucket <strong>" + escapeHtml(bucketFor(model)) + "</strong></span></div>" +
             previewMarkup +
             "<div class='model-texture-heading'><div><span class='models-eyebrow'>SOURCE TEXTURES</span><h3>模型纹理图集</h3></div><p>用于核对模型使用的原始贴图，不等同于模型本身。</p></div><div class='model-texture-grid' id='modelTextureGrid'></div>";
         var grid = document.getElementById("modelTextureGrid");
@@ -596,6 +637,8 @@
         var weaponButtons = Array.prototype.slice.call(document.querySelectorAll("[data-weapon-mode]"));
         var actionButtons = [];
         var faceButtons = Array.prototype.slice.call(document.querySelectorAll("[data-face-preset]"));
+        var modelRarity = rarityOf(preview.file);
+        var modelHasTotteoki = hasTotteoki(preview.file);
         if (!host || !resetButton) {
             return;
         }
@@ -892,6 +935,19 @@
                             pending[name] = true;
                             displayClips.push({ name: name });
                         }
+                    });
+                }
+                // ★3 never had a とっておき, but a skill.glb.gz was published for
+                // some of them anyway, so the catalog would happily offer one.
+                // Drop the ultimate group for anyone the rarity table says has
+                // no claim to it, whether the clip is already loaded or pending.
+                if (modelKind === "player" && !modelHasTotteoki) {
+                    displayClips = displayClips.filter(function (clip) {
+                        if (actionGroupOf(clip.name) !== "ultimate") {
+                            return true;
+                        }
+                        delete pending[clip.name];
+                        return false;
                     });
                 }
                 actionStrip.innerHTML = "";
@@ -2045,6 +2101,12 @@
             // Fetched only when asked for: each is ~180 KiB, far more than the
             // shared class actions, because the clips run 15 seconds.
             function skillActionSource() {
+                // ★3 has no とっておき even where a clip was published for it, so
+                // refuse the source outright rather than only hiding the button:
+                // nothing should be able to spend 180 KiB fetching it.
+                if (modelKind === "player" && !modelHasTotteoki) {
+                    return null;
+                }
                 // The catalog is keyed by the numeric model id, which the only
                 // identifier in scope here carries: preview.file always reads
                 // asset/models/model_pl_<id>/model.glb.gz.
@@ -2917,6 +2979,9 @@
             if (manifest.facialActions) {
                 FACIAL_ACTIONS_URL = manifest.facialActions;
             }
+            if (manifest.rarity) {
+                RARITY_TABLE_URL = manifest.rarity;
+            }
             manifestState.loaded = true;
         }).catch(function () {
             if (attempt < 2) {
@@ -2927,6 +2992,32 @@
                 });
             }
             manifestState.error = true;
+        });
+    }
+
+    // Small (≈50 KiB) and needed before the first model mounts, so it is fetched
+    // with the manifest rather than on demand. A failure must not block the
+    // viewer: without the table no ultimate is offered, which is the safe side of
+    // the gate -- 66 models lose a button they should not have had, and the rest
+    // lose one they should. The status line says so instead of failing silently.
+    function loadRarityTable() {
+        if (IS_LOCAL_FILE) {
+            return Promise.resolve();
+        }
+        return fetch(RARITY_TABLE_URL).then(function (response) {
+            if (!response.ok) {
+                throw new Error("HTTP " + response.status);
+            }
+            return response.json();
+        }).then(function (table) {
+            if (!table || !table.models || typeof table.models !== "object") {
+                throw new Error("invalid rarity table");
+            }
+            Object.keys(table.models).forEach(function (modelId) {
+                MODEL_RARITY[modelId] = table.models[modelId];
+            });
+        }).catch(function () {
+            manifestState.rarityError = true;
         });
     }
 
@@ -2979,5 +3070,7 @@
 
     buildPlayerMetadata();
     bindControls();
-    loadPreviewManifest().then(loadDatabase);
+    // The rarity table's URL can be overridden by the manifest, so it is fetched
+    // after the manifest resolves and before the database populates the grid.
+    loadPreviewManifest().then(loadRarityTable).then(loadDatabase);
 })();
