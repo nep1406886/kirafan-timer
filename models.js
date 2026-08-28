@@ -1539,17 +1539,13 @@
                             // back faces or the shell hides the weapon.
                             child.material.side = modelKind === "weapon" ? THREE.FrontSide : THREE.DoubleSide;
                             child.renderOrder = resolveRenderOrder(child);
-                            // Two-dimensional sprite layers (hair, shoes, skirt
-                            // frills, hats) carry their source draw order and sort
-                            // by it. Letting a translucent layer write depth makes
-                            // it occlude another layer near their shared silhouette,
-                            // which reads as edges flickering and parts flashing
-                            // through each other. Ordered layers defer to pure
-                            // renderOrder sorting instead of writing depth; opaque
-                            // body pieces keep depth so they still clip each other.
-                            child.material.depthWrite = child.renderOrder > 0
-                                ? false
-                                : preview.depthWrite !== false;
+                            // Two-dimensional sprite layers rely on their source
+                            // draw order, but half the models draw many of those
+                            // layers at the same renderOrder, so disabling depth
+                            // writes made layers collide and flash through each
+                            // other. Keep writing depth (the converted source
+                            // does) so closer layers still occlude further ones.
+                            child.material.depthWrite = preview.depthWrite !== false;
                             // Skinned vertices follow their bones, but frustum
                             // culling uses the node's bounding sphere, which
                             // stays at the skeleton origin for these exports —
