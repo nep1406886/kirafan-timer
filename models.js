@@ -556,11 +556,11 @@
             var facePresets = {
                 normal: { eye: ["eye_A_1", "eye_A"], eyebrow: ["eyebrow_A"], mouth: ["mouth_A", "mouth_B"], overlay: [] },
                 smile: { eye: ["eye_A_1", "eye_A"], eyebrow: ["eyebrow_A"], mouth: ["mouth_L", "mouth_D", "mouth_B", "mouth_A"], overlay: [] },
-                happy: { eye: ["eye_C", "eye_E", "eye_A_1", "eye_A"], eyebrow: ["eyebrow_B", "eyebrow_A"], mouth: ["mouth_D", "mouth_L", "mouth_C", "mouth_B"], overlay: [] },
-                angry: { eye: ["eye_J", "eye_F", "eye_D_2", "eye_A_1", "eye_A"], eyebrow: ["eyebrow_E", "eyebrow_D", "eyebrow_A"], mouth: ["mouth_I", "mouth_C_2", "mouth_C", "mouth_E"], overlay: [] },
-                sad: { eye: ["eye_G", "eye_E", "eye_D", "eye_A_1", "eye_A"], eyebrow: ["eyebrow_D", "eyebrow_C", "eyebrow_A"], mouth: ["mouth_G", "mouth_H", "mouth_B"], overlay: [] },
+                happy: { eye: ["eye_C", "eye_E", "eye_A_1", "eye_A"], eyebrow: ["eyebrow_B", "eyebrow_A"], mouth: ["mouth_D", "mouth_L", "mouth_C", "mouth_B"], overlay: ["tere", "cheek", "cheeck"] },
+                angry: { eye: ["eye_J", "eye_F", "eye_D_2", "eye_A_1", "eye_A"], eyebrow: ["eyebrow_E", "eyebrow_D", "eyebrow_A"], mouth: ["mouth_I", "mouth_C_2", "mouth_C", "mouth_E"], overlay: ["angry"] },
+                sad: { eye: ["eye_G", "eye_E", "eye_D", "eye_A_1", "eye_A"], eyebrow: ["eyebrow_D", "eyebrow_C", "eyebrow_A"], mouth: ["mouth_G", "mouth_H", "mouth_B"], overlay: ["cry", "namida"] },
                 surprised: { eye: ["eye_F", "eye_B_1", "eye_B", "eye_D_2", "eye_A_1", "eye_A"], eyebrow: ["eyebrow_D_2", "eyebrow_D", "eyebrow_A"], mouth: ["mouth_C", "mouth_C_2", "mouth_D"], overlay: [] },
-                abnormal: { eye: ["eye_G_2", "eye_G", "eye_E", "eye_K", "eye_A_1", "eye_A"], eyebrow: ["eyebrow_D", "eyebrow_C", "eyebrow_A"], mouth: ["mouth_G", "mouth_H", "mouth_B"], overlay: ["sen_1", "sen", "shade"] }
+                abnormal: { eye: ["eye_G_2", "eye_G", "eye_E", "eye_K", "eye_A_1", "eye_A"], eyebrow: ["eyebrow_D", "eyebrow_C", "eyebrow_A"], mouth: ["mouth_G", "mouth_H", "mouth_B"], overlay: ["sen", "shade", "shadow"] }
             };
             var actionFacePresets = {
                 idle: "normal",
@@ -1027,6 +1027,37 @@
                 return variant ? available[variant] : "";
             }
 
+            // Overlay names carry their meaning globally — cheek/tere is blush,
+            // cry/namida a tear, sen/shade cast shade, angry the anger mark —
+            // unlike the eye and mouth letters, which vary by character. A
+            // preset lists the overlays it should light; the first one the model
+            // actually has wins, so a bundle without blush shows none instead of
+            // a blank placeholder.
+            function resolveOverlayPart(prefixes) {
+                var available = faceParts.overlay;
+                if (!available) {
+                    return "";
+                }
+                if (!Array.isArray(prefixes)) {
+                    prefixes = prefixes ? [prefixes] : [];
+                }
+                for (var i = 0; i < prefixes.length; i++) {
+                    var wanted = canonicalFacePartKey(prefixes[i]);
+                    if (!wanted) {
+                        continue;
+                    }
+                    var match = Object.keys(available).filter(function (key) {
+                        return key === wanted || key.indexOf(wanted + "_") === 0;
+                    }).sort(function (a, b) {
+                        return a.localeCompare(b, undefined, { numeric: true });
+                    })[0];
+                    if (match) {
+                        return available[match];
+                    }
+                }
+                return "";
+            }
+
             // Models without the standard preset parts (hybrid enemies with
             // player-style faces) need a neutral fallback: prefer explicit
             // default/normal variants over damage states, which sort first
@@ -1064,7 +1095,7 @@
                 Object.keys(faceParts).forEach(function (kind) {
                     var requested = preset[kind];
                     if (kind === "overlay") {
-                        selectedParts[kind] = resolveFacePartName(kind, requested, false);
+                        selectedParts[kind] = resolveOverlayPart(requested);
                         return;
                     }
                     var requestedPart = resolveFacePartName(kind, requested, true);
