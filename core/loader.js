@@ -186,6 +186,14 @@ export function applyMaterialRules(root, THREE, options) {
     const opts = options || {};
     const kind = opts.kind || "player";
     const depthWrite = opts.depthWrite !== false;
+    // The GLB asks for LINEAR_MIPMAP_LINEAR, which is right, but mipmapping alone
+    // blurs a texture the moment it is viewed at an angle: the hardware picks a
+    // mip level for the worst-numbered axis, so a surface slanting away loses
+    // detail along the axis that was still nearly 1:1. Anisotropic filtering
+    // samples along the actual projected footprint instead. Skirt panels, sleeves
+    // and the ground-facing sides of shoes are the visible beneficiaries.
+    const maxAnisotropy = opts.maxAnisotropy || 0;
+    const seenTextures = new Set();
     root.traverse(function (child) {
         if (!child.isMesh || !child.material) {
             return;
@@ -197,11 +205,35 @@ export function applyMaterialRules(root, THREE, options) {
             material.alphaTest = blended ? 0 : 0.01;
             material.depthWrite = !blended && depthWrite;
             material.depthTest = true;
+            // An alpha test is a binary keep-or-discard, and a discard is not
+            // something MSAA can average -- so every alpha-tested edge came out
+            // stair-stepped no matter how high the sample count. Hair strands and
+            // fan ribs, which are one or two texels wide, broke up badly.
+            //
+            // Alpha-to-coverage turns the texture's alpha into MSAA coverage, so
+            // those edges get resolved by the same multisample buffer that already
+            // smooths geometry. The material stays opaque and keeps writing depth,
+            // so the queue order and the seam fix above are untouched -- this is
+            // the one way to soften these edges without re-entering the
+            // transparent queue.
+            material.alphaToCoverage = !blended;
             // Weapons carry their cartoon outline as an inverted hull mapped to
             // a black texel, so they must cull back faces or the shell hides
             // the weapon. Characters stay double-sided because mirrored
             // left/right pieces have no reliable GLB winding direction.
             material.side = kind === "weapon" ? THREE.FrontSide : THREE.DoubleSide;
+            if (maxAnisotropy > 1) {
+                ["map", "emissiveMap", "alphaMap"].forEach(function (slot) {
+                    const texture = material[slot];
+                    // Textures are shared between materials, so guard against
+                    // re-flagging one and forcing needless re-uploads.
+                    if (texture && !seenTextures.has(texture)) {
+                        seenTextures.add(texture);
+                        texture.anisotropy = maxAnisotropy;
+                        texture.needsUpdate = true;
+                    }
+                });
+            }
         });
         child.renderOrder = resolveRenderOrder(child);
         // Skinned vertices follow their bones, but frustum culling uses the
@@ -238,7 +270,8 @@ export function load(assetKey, options) {
             }).then(function (gltf) {
                 applyMaterialRules(gltf.scene, modules.THREE, {
                     kind: opts.kind || assetKey.split("/")[1],
-                    depthWrite: entry.depthWrite
+                    depthWrite: entry.depthWrite,
+                    maxAnisotropy: opts.maxAnisotropy
                 });
                 return { scene: gltf.scene, animations: gltf.animations || [], entry: entry };
             });

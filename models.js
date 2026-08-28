@@ -701,7 +701,18 @@
                 dead: "abnormal"
             };
 
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+            // 渲染精度。素材是 512x512 贴图，角色在台上约 600-700 px 高，等于把
+            // 贴图放大着看，所以采样质量决定了成像是否清晰。
+            //
+            // 这里按 CSS 像素的 2 倍超采样：devicePixelRatio 为 1 的普通屏也强制
+            // 2x，渲染后由浏览器缩回,相当于 SSAA。只用 devicePixelRatio 的话，
+            // 1x 屏幕会逐像素点对点采样，头发丝和扇骨这类一像素宽的结构直接碎掉。
+            var superSample = Math.max(2, Math.min(window.devicePixelRatio || 1, 2));
+            renderer.setPixelRatio(superSample);
+            // 由显卡上报上限决定，不写死：桌面通常是 16，移动端常见 2 或 4。
+            var maxAnisotropy = renderer.capabilities.getMaxAnisotropy
+                ? renderer.capabilities.getMaxAnisotropy()
+                : 1;
             renderer.outputColorSpace = THREE.SRGBColorSpace;
             renderer.setClearColor(0x000000, 0);
             host.innerHTML = "";
@@ -1988,6 +1999,7 @@
                                             child.material.transparent = false;
                                             child.material.alphaTest = 0.015;
                                             child.material.depthWrite = true;
+                                            child.material.alphaToCoverage = true;
                                             child.material.depthTest = true;
                                             // Weapons carry a cartoon outline as an
                                             // inverted hull: a scaled-up shell whose
@@ -2190,6 +2202,23 @@
                             child.material.depthWrite = !blended
                                 && preview.depthWrite !== false;
                             child.material.depthTest = true;
+                            // 一个 alpha test 只能"保留或丢弃"，而 discard 不是
+                            // MSAA 能平均的东西，所以不管开多少采样，被 alpha
+                            // test 切出来的边缘一律是锯齿。头发丝、扇骨这种只有
+                            // 一两个纹素宽的结构最明显。
+                            //
+                            // alpha-to-coverage 把贴图的 alpha 转成 MSAA 覆盖率，
+                            // 让这些边交给已经在平滑几何边缘的多重采样缓冲去解算。
+                            // 材质仍然是不透明并继续写深度，所以上面那套队列顺序
+                            // 和接缝修复完全不受影响。
+                            child.material.alphaToCoverage = !blended;
+                            // 各向异性过滤：mipmap 会在斜视时整体降级，裙摆、袖子
+                            // 和鞋子朝地的那一面因此发糊。
+                            if (maxAnisotropy > 1 && child.material.map
+                                && child.material.map.anisotropy !== maxAnisotropy) {
+                                child.material.map.anisotropy = maxAnisotropy;
+                                child.material.map.needsUpdate = true;
+                            }
                             // Weapons carry their cartoon outline as an inverted
                             // hull mapped to a black texel, so they must cull
                             // back faces or the shell hides the weapon.
@@ -2217,6 +2246,21 @@
                     // model shows one eye/brow/mouth layer and no overlays.
                     if (new URLSearchParams(window.location.search).get("debug") === "1") {
                         window.__modelDebug = modelObject;
+                        // 渲染质量是靠采样设置决定的，而这些设置只有 renderer
+                        // 拿得到。没有这个句柄，A/B 测量只能去截图，而截图是按
+                        // CSS 尺寸合成的，浏览器自己的缩放会造出一堆灰阶，把
+                        // MSAA 的效果整个盖掉——先前一次对比就是这样得出"没有
+                        // 变化"的假结论。仅在 debug 模式下挂出。
+                        window.__rendererDebug = {
+                            renderer: renderer,
+                            scene: scene,
+                            camera: camera,
+                            render: function () { renderer.render(scene, camera); },
+                            setPixelRatio: function (value) {
+                                renderer.setPixelRatio(value);
+                                resize();
+                            }
+                        };
                         // Enough of the facial engine to check it from outside:
                         // which row is applied, which clip event drove it, and the
                         // clip clock that decides when the next one lands.
