@@ -1203,3 +1203,260 @@ textarea {
         transition: opacity 420ms ease var(--motion-delay, 0ms);
     }
 }
+
+/* Title screen BGM dock — round official-style buttons with a track menu. */
+.bgm-player {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 70;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 10px;
+    font-family: "Yu Gothic", "Noto Sans SC", sans-serif;
+}
+
+.bgm-dock {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border: 2px solid var(--official-brown);
+    border-radius: 999px;
+    background: var(--official-paper);
+    box-shadow: 5px 5px 0 rgba(255, 103, 143, 0.4);
+}
+
+.bgm-now {
+    max-width: 150px;
+    padding-left: 8px;
+    overflow: hidden;
+    color: var(--official-brown);
+    font-size: 0.72rem;
+    font-weight: 700;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.bgm-now:empty {
+    display: none;
+}
+
+.bgm-dock-button {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border: 2px solid var(--official-brown);
+    border-radius: 50%;
+    background: #fff;
+    color: var(--official-pink-dark);
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: transform 150ms ease;
+}
+
+.bgm-dock-button:hover,
+.bgm-dock-button:focus-visible {
+    transform: translateY(-2px);
+}
+
+.bgm-dock-play {
+    background: var(--official-pink);
+    color: #fff;
+}
+
+.bgm-disc {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background:
+        radial-gradient(circle, #fff 0 3px, var(--official-brown) 3px 5px, transparent 5px),
+        repeating-radial-gradient(circle, #4d352f 0 2px, #5d443c 2px 4px);
+    animation: bgm-disc-spin 2.6s linear infinite;
+    animation-play-state: paused;
+}
+
+.bgm-player.is-playing .bgm-disc {
+    animation-play-state: running;
+}
+
+.bgm-player.is-playing .bgm-dock-play::before {
+    content: "";
+    position: absolute;
+    inset: -5px;
+    border: 2px solid rgba(255, 103, 143, 0.55);
+    border-radius: 50%;
+    animation: bgm-pulse 1.8s ease-out infinite;
+}
+
+.bgm-player.is-muted .bgm-dock-play::after {
+    content: "";
+    position: absolute;
+    width: 26px;
+    height: 2px;
+    border-radius: 2px;
+    background: #fff;
+    transform: rotate(-45deg);
+}
+
+.bgm-menu {
+    min-width: 216px;
+    max-width: min(264px, calc(100vw - 32px));
+    padding: 12px 12px 10px;
+    border: 2px solid var(--official-pink);
+    border-radius: 12px;
+    background: var(--official-paper);
+    box-shadow: 5px 5px 0 rgba(111, 160, 255, 0.35);
+}
+
+.bgm-menu-heading {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--official-pink-dark);
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+}
+
+.bgm-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 1px dashed var(--official-brown);
+}
+
+.bgm-tab {
+    padding: 2px 1px 4px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    background: transparent;
+    color: var(--official-ink);
+    font: inherit;
+    font-size: 0.68rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.bgm-tab:hover,
+.bgm-tab:focus-visible {
+    color: var(--official-pink-dark);
+}
+
+.bgm-tab.is-active {
+    color: var(--official-pink-dark);
+    border-bottom-color: var(--official-pink);
+}
+
+.bgm-tab:focus,
+.bgm-track:focus {
+    outline: none;
+}
+
+.bgm-tab:focus-visible,
+.bgm-track:focus-visible {
+    outline: 2px solid var(--official-pink-dark);
+    outline-offset: 2px;
+}
+
+.bgm-group-label {
+    margin: 6px 2px 3px;
+    color: var(--official-pink-dark);
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+}
+
+.bgm-group-label:first-child {
+    margin-top: 0;
+}
+
+.bgm-menu-list {
+    display: grid;
+    gap: 4px;
+    max-height: min(46vh, 360px);
+    overflow-y: auto;
+    padding-right: 2px;
+}
+
+.bgm-track {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 6px 9px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--official-ink);
+    font: inherit;
+    font-size: 0.78rem;
+    text-align: left;
+    cursor: pointer;
+}
+
+.bgm-track small {
+    color: #a08a80;
+    font-size: 0.64rem;
+}
+
+.bgm-track:hover,
+.bgm-track:focus-visible {
+    background: var(--official-blush);
+}
+
+.bgm-track.is-active {
+    border-color: var(--official-pink);
+    background: var(--official-blush);
+    color: var(--official-pink-dark);
+    font-weight: 700;
+    box-shadow: inset 3px 0 0 var(--official-pink);
+}
+}
+
+@keyframes bgm-disc-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes bgm-pulse {
+    0% {
+        transform: scale(0.9);
+        opacity: 0.9;
+    }
+
+    100% {
+        transform: scale(1.25);
+        opacity: 0;
+    }
+}
+
+@media (max-width: 640px) {
+    .bgm-player {
+        right: 12px;
+        bottom: 12px;
+    }
+
+    .bgm-now {
+        max-width: 96px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .bgm-disc {
+        animation: none;
+    }
+
+    .bgm-player.is-playing .bgm-dock-play::before {
+        animation: none;
+        opacity: 0.7;
+    }
+}
