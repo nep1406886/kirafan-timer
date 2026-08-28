@@ -151,9 +151,46 @@ main { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 54
 .model-3d-actions button { padding: 6px 9px; border: 1px solid rgba(255,255,255,0.22); border-radius: 4px; background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.82); cursor: pointer; font-size: 0.68rem; }
 .model-3d-actions button:hover { border-color: rgba(244,216,137,0.64); color: #f4d889; }
 .model-3d-actions button[aria-expanded="true"] { border-color: rgba(116,214,173,0.58); color: #9be6c5; }
-.model-viewer-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(270px, 310px); min-height: 620px; }
-.model-viewer-stage { position: relative; min-width: 0; min-height: 620px; overflow: hidden; }
-.model-viewer-inspector { min-width: 0; max-height: 720px; overflow-y: auto; border-left: 1px solid rgba(255,255,255,0.11); background: #2d252a; overscroll-behavior: contain; }
+/* 高度必须是确定值，不能由内容决定。若让行高跟着控制台内容长，舞台的高度就
+   要等控制台挂完才定下来，而 renderer.setSize 已经按挂载前的高度算过一次 aspect
+   和取景，于是首帧的画面比例是错的。 */
+.model-viewer-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(270px, 310px); height: clamp(620px, 78svh, 860px); }
+/* 舞台改成两行：画布占满剩余高度，播放条固定在底部。
+   画布原本是 absolute inset:0，那样会盖住播放条，所以交给 grid 定尺寸。 */
+.model-viewer-stage { position: relative; min-width: 0; min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; overflow: hidden; }
+.model-shortcut-hint { align-self: center; color: rgba(255,255,255,0.34); font-size: 0.6rem; letter-spacing: 0.02em; white-space: nowrap; }
+.model-transport { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-top: 1px solid rgba(255,255,255,0.11); background: rgba(21,17,20,0.92); }
+.model-transport-play { flex: 0 0 auto; width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid rgba(116,214,173,0.5); border-radius: 50%; background: rgba(58,132,105,0.22); color: #9be6c5; cursor: pointer; font-size: 0.72rem; }
+.model-transport-play:hover { border-color: rgba(155,230,197,0.9); background: rgba(58,132,105,0.36); }
+.model-transport-play.is-paused { border-color: rgba(244,216,137,0.55); background: rgba(201,152,61,0.2); color: #f4d889; padding-left: 3px; }
+.model-transport-track { flex: 1 1 auto; min-width: 60px; display: flex; align-items: center; }
+.model-transport-track input { width: 100%; accent-color: #74d6ad; cursor: pointer; }
+.model-transport-track input:disabled { cursor: default; opacity: 0.4; }
+.model-transport-time { flex: 0 0 auto; min-width: 9.5em; color: rgba(255,255,255,0.62); font-size: 0.63rem; font-variant-numeric: tabular-nums; text-align: right; }
+.model-transport-speed { flex: 0 0 auto; display: flex; gap: 3px; }
+.model-transport-speed button { min-width: 30px; min-height: 26px; padding: 3px 5px; border: 1px solid rgba(255,255,255,0.14); border-radius: 4px; background: transparent; color: rgba(255,255,255,0.6); cursor: pointer; font-size: 0.62rem; }
+.model-transport-speed button:hover { border-color: rgba(244,216,137,0.44); color: #f4d889; }
+.model-transport-speed button.is-active { border-color: rgba(116,214,173,0.58); background: rgba(58,132,105,0.2); color: #9be6c5; }
+.model-transport-loop { flex: 0 0 auto; width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid rgba(255,255,255,0.14); border-radius: 4px; background: transparent; color: rgba(255,255,255,0.5); cursor: pointer; font-size: 0.78rem; }
+.model-transport-loop:hover { border-color: rgba(244,216,137,0.44); color: #f4d889; }
+.model-transport-loop.is-active { border-color: rgba(116,214,173,0.58); background: rgba(58,132,105,0.2); color: #9be6c5; }
+.model-viewer-inspector { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); border-left: 1px solid rgba(255,255,255,0.11); background: #2d252a; }
+.model-inspector-tabs { display: flex; border-bottom: 1px solid rgba(255,255,255,0.11); background: rgba(21,17,20,0.6); }
+.model-inspector-tabs button { flex: 1 1 0; min-width: 0; min-height: 38px; padding: 8px 6px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: rgba(255,255,255,0.52); cursor: pointer; font-size: 0.7rem; }
+.model-inspector-tabs button:hover { color: #f4d889; }
+.model-inspector-tabs button.is-active { border-bottom-color: #74d6ad; color: #9be6c5; }
+/* 只有内容区滚动，分页条始终留在视线里。 */
+.model-inspector-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.model-control-panel[hidden] { display: none; }
+.model-action-groups { display: grid; }
+.model-action-group { padding: 12px 12px 13px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.model-action-group:last-child { border-bottom: 0; }
+/* 必杀演出是这一页的主角，给它更亮的底色和整行的按钮。 */
+.model-action-group[data-action-group="ultimate"] { background: linear-gradient(180deg, rgba(180,85,115,0.18), rgba(180,85,115,0.05)); }
+.model-action-group[data-action-group="ultimate"] .model-action-strip { grid-template-columns: 1fr; }
+.model-action-group[data-action-group="ultimate"] .model-action-strip button { min-height: 52px; border-color: rgba(244,216,137,0.4); background: rgba(201,152,61,0.14); color: #ffe9b8; font-size: 0.74rem; }
+.model-action-group[data-action-group="ultimate"] .model-action-strip button:hover { border-color: rgba(244,216,137,0.85); }
+.model-control-hint { margin: 0; padding: 10px 12px 14px; color: rgba(255,255,255,0.38); font-size: 0.6rem; line-height: 1.7; }
 .model-control-section { padding: 13px 12px 14px; border-bottom: 1px solid rgba(255,255,255,0.1); }
 .model-control-section[hidden] { display: none; }
 .model-control-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
@@ -165,6 +202,11 @@ main { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 54
 .model-action-strip button:hover { border-color: rgba(244,216,137,0.42); }
 .model-action-strip button.is-active { border-color: rgba(116,214,173,0.58); background: rgba(58,132,105,0.18); color: #9be6c5; }
 .model-action-strip button.is-active small { color: rgba(155,230,197,0.62); }
+/* 尚未下载的演出：右上角一个点提示「点了才会取」。 */
+.model-action-strip button.is-pending { position: relative; }
+.model-action-strip button.is-pending::after { content: ""; position: absolute; top: 6px; right: 6px; width: 5px; height: 5px; border-radius: 50%; background: #f4d889; }
+.model-action-strip button.is-loading { cursor: progress; opacity: 0.7; }
+.model-action-strip button.is-loading::after { animation: model-spin 0.9s linear infinite; border: 1px solid rgba(244,216,137,0.35); border-top-color: #f4d889; border-radius: 50%; background: none; width: 11px; height: 11px; }
 .model-face-strip { display: flex; flex-wrap: wrap; gap: 6px; }
 .model-face-strip button { min-height: 32px; padding: 5px 8px; border: 1px solid rgba(255,255,255,0.13); border-radius: 4px; background: transparent; color: rgba(255,255,255,0.7); cursor: pointer; font-size: 0.65rem; }
 .model-face-strip button:hover { border-color: rgba(244,216,137,0.42); color: #f4d889; }
@@ -185,9 +227,13 @@ main { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 54
 .model-adjust-drawer label { display: grid; grid-template-columns: 62px minmax(80px, 1fr) 42px; align-items: center; gap: 8px; color: rgba(255,255,255,0.64); font-size: 0.64rem; }
 .model-adjust-drawer input { width: 100%; accent-color: #74d6ad; }
 .model-adjust-drawer output { color: #f4d889; font-variant-numeric: tabular-nums; text-align: right; }
-.model-3d-canvas { position: absolute; inset: 0; overflow: hidden; background: radial-gradient(ellipse at 50% 44%, rgba(138,99,120,0.3), rgba(25,21,24,0.12) 46%, rgba(15,13,15,0.4)); touch-action: none; }
+/* 舞台是 grid，画布占第一行；loading / error 覆盖层仍靠它做定位原点。 */
+.model-3d-canvas { position: relative; min-height: 0; overflow: hidden; background: radial-gradient(ellipse at 50% 44%, rgba(138,99,120,0.3), rgba(25,21,24,0.12) 46%, rgba(15,13,15,0.4)); touch-action: none; }
 .model-3d-canvas::before { content: ""; position: absolute; left: 16%; right: 16%; bottom: 10%; height: 9%; border-radius: 50%; background: rgba(0,0,0,0.22); filter: blur(14px); pointer-events: none; }
-.model-3d-canvas canvas { position: relative; z-index: 1; display: block; width: 100%; height: 100%; cursor: grab; }
+/* 画布元素必须脱离文档流。它的 width/height 属性由 renderer.setSize 按
+   host.clientHeight 写入，若留在流内，这个属性尺寸又会反过来决定 grid 行高，
+   于是每次 resize 都把舞台推高一截（实测被顶到 957px）。 */
+.model-3d-canvas canvas { position: absolute; inset: 0; z-index: 1; display: block; width: 100%; height: 100%; cursor: grab; }
 .model-3d-canvas canvas:active { cursor: grabbing; }
 .model-3d-loading, .model-3d-error { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 8px; color: rgba(255,255,255,0.7); font-size: 0.76rem; z-index: 2; }
 .model-3d-loading p, .model-3d-error p { max-width: 30em; margin: 0; text-align: center; line-height: 1.7; }
@@ -224,9 +270,19 @@ main { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 54
 .models-footer a:hover { text-decoration: underline; }
 
 @media (max-width: 1180px) {
-    .model-viewer-layout { grid-template-columns: 1fr; }
-    .model-viewer-stage { min-height: 560px; }
-    .model-viewer-inspector { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: none; overflow: visible; border-top: 1px solid rgba(255,255,255,0.11); border-left: 0; }
+    /* 堆叠后舞台自己定高，控制台跟着内容长，整页滚动。 */
+    .model-viewer-layout { grid-template-columns: 1fr; height: auto; }
+    .model-viewer-stage { height: clamp(480px, 62svh, 640px); }
+    /* 窄屏时控制台移到舞台下方，整页滚动即可，面板自己不再限高。 */
+    .model-viewer-inspector { grid-template-rows: auto auto; max-height: none; border-top: 1px solid rgba(255,255,255,0.11); border-left: 0; }
+    .model-inspector-body { overflow: visible; }
+    .model-inspector-tabs { position: sticky; top: 0; z-index: 3; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); background: rgba(30,24,28,0.94); }
+    /* 横向空间足够，动作分组两列排。 */
+    .model-action-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .model-action-group { border-right: 1px solid rgba(255,255,255,0.08); }
+    .model-action-group[data-action-group="ultimate"] { grid-column: 1 / -1; }
+    .model-action-group[data-action-group="ultimate"] .model-action-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #modelPanelSetup { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .model-control-section { border-right: 1px solid rgba(255,255,255,0.08); }
 }
 
@@ -259,8 +315,16 @@ main { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 54
     .model-3d-toolbar { align-items: flex-start; flex-direction: column; }
     .model-3d-actions { width: 100%; flex-wrap: wrap; }
     .model-3d-actions button { flex: 1 1 auto; min-height: 36px; }
-    .model-viewer-stage { min-height: 0; height: clamp(430px, 66svh, 620px); }
-    .model-viewer-inspector { grid-template-columns: 1fr; }
+    .model-shortcut-hint { display: none; }
+    .model-viewer-stage { height: clamp(430px, 66svh, 620px); }
+    /* 手机上播放条换行：播放键和时间轴一行，速度和循环一行。 */
+    .model-transport { flex-wrap: wrap; gap: 8px; }
+    .model-transport-track { flex: 1 1 100px; }
+    .model-transport-time { min-width: 0; flex: 1 1 auto; text-align: left; }
+    .model-action-groups { grid-template-columns: 1fr; }
+    .model-action-group { border-right: 0; }
+    .model-action-group[data-action-group="ultimate"] .model-action-strip { grid-template-columns: 1fr; }
+    #modelPanelSetup { grid-template-columns: 1fr; }
     .model-control-section { border-right: 0; }
     .model-adjust-drawer { grid-template-columns: 1fr; }
     .model-conversion-note { align-items: flex-start; flex-direction: column; gap: 4px; }

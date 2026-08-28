@@ -8,6 +8,11 @@
     var MODEL_PATH = /^model\/(player|enemy|weapon|shadow)\//;
     var MODEL_PREVIEWS = {};
     var CLASS_ACTION_PREVIEWS = {};
+    // Per-character skill motion, keyed by the model id. とっておき (skill) and the
+    // character's own battle skill live in their own GLBs because they are ~180
+    // KiB each and only matter once someone asks for them. Written by
+    // tools/build_skill_action_catalog.py.
+    var SKILL_ACTION_PREVIEWS = {};
     var PLAYER_MODEL_META = {};
     var MODEL_TITLES = [];
     var manifestState = { loaded: false, error: false, offline: false };
@@ -364,10 +369,11 @@
         var metadata = modelMetadata(model);
         var hasPlayerActions = Boolean(preview && (preview.animations || metadata || parts.kind === "enemy"));
         var actionMarkup = hasPlayerActions
-            ? "<section class='model-control-section'><div class='model-control-heading'><strong>动作</strong><small>" + (parts.kind === "enemy" && !preview.animations ? "动作预览" : "官方 AnimationClip") + "</small></div><div id='modelActionStrip' class='model-action-strip' role='group' aria-label='游戏动作'></div></section>"
+            ? "<div class='model-control-panel' id='modelPanelAction' data-inspector-panel='action' role='tabpanel' aria-labelledby='modelTabAction'><div id='modelActionStrip' class='model-action-groups' role='group' aria-label='游戏动作'></div><p class='model-control-hint'>" + (parts.kind === "enemy" && !preview.animations ? "该敌人包未附带 AnimationClip，以下为程序化预览。" : "动作取自游戏原始 AnimationClip，表情按官方表情表跟随。") + "</p></div>"
             : "";
-        var faceMarkup = preview
-            ? "<section class='model-control-section' id='modelFaceInterface'" + (preview.expressions ? "" : " hidden") + "><div class='model-control-heading'><strong>表情</strong><small>状态层默认关闭</small></div><div class='model-face-strip' role='group' aria-label='表情预设'><button class='is-active' type='button' id='modelFaceAuto' aria-pressed='true'>跟随动作</button><button type='button' data-face-preset='normal' aria-pressed='false'>通常</button><button type='button' data-face-preset='smile' aria-pressed='false'>微笑</button><button type='button' data-face-preset='happy' aria-pressed='false'>开心</button><button type='button' data-face-preset='angry' aria-pressed='false'>生气</button><button type='button' data-face-preset='sad' aria-pressed='false'>难过</button><button type='button' data-face-preset='surprised' aria-pressed='false'>惊讶</button><button type='button' data-face-preset='abnormal' aria-pressed='false'>异常状态</button></div><details class='model-face-advanced' id='modelFaceAdvanced'><summary>表情组件</summary><div id='modelFaceControls' class='model-face-controls'></div></details></section>"
+        // 武器这类没有表情层的模型不该出现「表情」页，那一页会是空的。
+        var faceMarkup = preview && preview.expressions
+            ? "<div class='model-control-panel' id='modelPanelFace' data-inspector-panel='face' role='tabpanel' aria-labelledby='modelTabFace' hidden><section class='model-control-section' id='modelFaceInterface'><div class='model-control-heading'><strong>表情预设</strong><small>状态层默认关闭</small></div><div class='model-face-strip' role='group' aria-label='表情预设'><button class='is-active' type='button' id='modelFaceAuto' aria-pressed='true'>跟随动作</button><button type='button' data-face-preset='normal' aria-pressed='false'>通常</button><button type='button' data-face-preset='smile' aria-pressed='false'>微笑</button><button type='button' data-face-preset='happy' aria-pressed='false'>开心</button><button type='button' data-face-preset='angry' aria-pressed='false'>生气</button><button type='button' data-face-preset='sad' aria-pressed='false'>难过</button><button type='button' data-face-preset='surprised' aria-pressed='false'>惊讶</button><button type='button' data-face-preset='abnormal' aria-pressed='false'>异常状态</button></div><details class='model-face-advanced' id='modelFaceAdvanced'><summary>表情组件</summary><div id='modelFaceControls' class='model-face-controls'></div></details></section></div>"
             : "";
         var unavailableMarkup = manifestState.offline
             ? "<div class='model-conversion-note'><strong>本地直接打开时无法预览 3D 模型</strong><span>" + escapeHtml(LOCAL_FILE_HINT) + "</span></div>"
@@ -387,8 +393,44 @@
         var adjustMarkup = preview
             ? "<section class='model-control-section model-view-controls'><div class='model-control-heading'><strong>构图</strong><small>画布视图</small></div><div class='model-adjust-drawer' id='modelAdjustDrawer'><label><span>模型大小</span><input id='modelScaleRange' type='range' min='60' max='160' value='100' step='1'><output id='modelScaleValue'>100%</output></label><label><span>上下位置</span><input id='modelVerticalRange' type='range' min='-50' max='50' value='0' step='1'><output id='modelVerticalValue'>0</output></label></div></section>"
             : "";
+        // 装备与构图都是「设置一次就不再动」的控制，合成一个标签页，
+        // 让动作和表情各自独占一屏，不必再滚动侧栏。
+        var setupMarkup = weaponMarkup || adjustMarkup
+            ? "<div class='model-control-panel' id='modelPanelSetup' data-inspector-panel='setup' role='tabpanel' aria-labelledby='modelTabSetup' hidden>" + weaponMarkup + adjustMarkup + "</div>"
+            : "";
+        var inspectorTabs = [];
+        if (actionMarkup) {
+            inspectorTabs.push({ key: "action", label: "动作" });
+        }
+        if (faceMarkup) {
+            inspectorTabs.push({ key: "face", label: "表情" });
+        }
+        if (setupMarkup) {
+            inspectorTabs.push({ key: "setup", label: "装备构图" });
+        }
+        var tabsMarkup = inspectorTabs.length > 1
+            ? "<div class='model-inspector-tabs' role='tablist' aria-label='模型控制台分页'>" + inspectorTabs.map(function (tab, index) {
+                return "<button type='button' role='tab' id='modelTab" + tab.key.charAt(0).toUpperCase() + tab.key.slice(1)
+                    + "' data-inspector-tab='" + tab.key + "' aria-controls='modelPanel" + tab.key.charAt(0).toUpperCase() + tab.key.slice(1) + "'"
+                    + " aria-selected='" + String(index === 0) + "' class='" + (index === 0 ? "is-active" : "") + "'>" + escapeHtml(tab.label) + "</button>";
+            }).join("") + "</div>"
+            : "";
+        // 播放条只在真有动画时出现：敌人程序化预览没有时间轴可拖。
+        var transportMarkup = hasPlayerActions
+            ? "<div class='model-transport' id='modelTransport'>"
+                + "<button id='modelMotionToggle' type='button' class='model-transport-play' aria-pressed='true' title='播放 / 暂停（空格）'><span aria-hidden='true'>❙❙</span></button>"
+                + "<div class='model-transport-track'><input id='modelTimeline' type='range' min='0' max='1000' value='0' step='1' aria-label='动作进度' title='拖动可逐帧检视（← →）'></div>"
+                + "<span class='model-transport-time' id='modelTimeReadout'>0.00 / 0.00 s</span>"
+                + "<div class='model-transport-speed' role='group' aria-label='播放速度'>"
+                + "<button type='button' data-playback-rate='0.25'>¼×</button>"
+                + "<button type='button' data-playback-rate='0.5'>½×</button>"
+                + "<button type='button' data-playback-rate='1' class='is-active' aria-pressed='true'>1×</button>"
+                + "</div>"
+                + "<button id='modelLoopToggle' type='button' class='model-transport-loop is-active' aria-pressed='true' title='循环播放（L）'><span aria-hidden='true'>↻</span></button>"
+                + "</div>"
+            : "";
         var previewMarkup = preview
-            ? "<section class='model-3d-card' aria-label='游戏模型预览'><div class='model-3d-toolbar'><div><span class='model-live-badge'><i aria-hidden='true'></i>LIVE WEBGL</span><strong>模型观察台</strong><small>" + escapeHtml(preview.label) + "</small></div><div class='model-3d-actions'>" + (hasPlayerActions ? "<button id='modelMotionToggle' type='button' aria-pressed='true' title='暂停或恢复动作'><span aria-hidden='true'>Ⅱ</span> 动作</button>" : "") + "<button id='modelViewReset' type='button' title='恢复模型位置和镜头'><span aria-hidden='true'>↺</span> 重置</button></div></div><div class='model-viewer-layout'><div class='model-viewer-stage'><div id='model3dCanvas' class='model-3d-canvas'><div class='model-3d-loading'><span class='model-spinner' aria-hidden='true'></span><p>正在读取模型数据……</p></div></div></div><aside class='model-viewer-inspector' aria-label='模型控制台'>" + weaponMarkup + actionMarkup + faceMarkup + adjustMarkup + "</aside></div></section>"
+            ? "<section class='model-3d-card' aria-label='游戏模型预览'><div class='model-3d-toolbar'><div><span class='model-live-badge'><i aria-hidden='true'></i>LIVE WEBGL</span><strong>模型观察台</strong><small>" + escapeHtml(preview.label) + "</small></div><div class='model-3d-actions'><span class='model-shortcut-hint'>空格播放 · ←→ 逐帧 · R 重置</span><button id='modelViewReset' type='button' title='恢复模型位置和镜头（R）'><span aria-hidden='true'>↺</span> 重置</button></div></div><div class='model-viewer-layout'><div class='model-viewer-stage'><div id='model3dCanvas' class='model-3d-canvas'><div class='model-3d-loading'><span class='model-spinner' aria-hidden='true'></span><p>正在读取模型数据……</p></div></div>" + transportMarkup + "</div><aside class='model-viewer-inspector' aria-label='模型控制台'>" + tabsMarkup + "<div class='model-inspector-body'>" + actionMarkup + faceMarkup + setupMarkup + "</div></aside></div></section>"
             : unavailableMarkup;
         var identityMarkup = metadata
             ? "<span>作品 <strong>" + escapeHtml(bilingualLabel(metadata.titleZh, metadata.title)) + "</strong></span><span>角色 <strong>" + escapeHtml(bilingualLabel(metadata.characterZh, metadata.character)) + "</strong></span>"
@@ -404,9 +446,37 @@
             card.innerHTML = "<div class='model-texture-frame'><img src='" + modelAssetUrl(model, spriteName) + "' alt='" + escapeHtml(spriteName) + "' loading='lazy' decoding='async'></div><figcaption><strong>" + escapeHtml(spriteName.split("/").pop()) + "</strong><span>纹理 " + (index + 1) + " / " + spriteCount + "</span></figcaption>";
             grid.appendChild(card);
         });
+        mountInspectorTabs();
         if (preview) {
             mount3DModel(preview, metadata, parts.kind);
         }
+    }
+
+    function mountInspectorTabs() {
+        var tabs = Array.prototype.slice.call(document.querySelectorAll("[data-inspector-tab]"));
+        var panels = Array.prototype.slice.call(document.querySelectorAll("[data-inspector-panel]"));
+        if (!panels.length) {
+            return;
+        }
+        tabs.forEach(function (tab) {
+            tab.addEventListener("click", function () {
+                selectInspectorTab(tab.dataset.inspectorTab);
+            });
+        });
+        // 打开哪一页由实际存在的面板决定，不能写死在标记里：武器没有动作页，
+        // 若默认展开「动作」就会一页都不显示。
+        selectInspectorTab(panels[0].dataset.inspectorPanel);
+    }
+
+    function selectInspectorTab(key) {
+        document.querySelectorAll("[data-inspector-tab]").forEach(function (tab) {
+            var isActive = tab.dataset.inspectorTab === key;
+            tab.classList.toggle("is-active", isActive);
+            tab.setAttribute("aria-selected", String(isActive));
+        });
+        document.querySelectorAll("[data-inspector-panel]").forEach(function (panel) {
+            panel.hidden = panel.dataset.inspectorPanel !== key;
+        });
     }
 
     // The exporter records each sprite layer's draw order in the glTF node
@@ -502,6 +572,10 @@
         var verticalRange = document.getElementById("modelVerticalRange");
         var verticalValue = document.getElementById("modelVerticalValue");
         var actionStrip = document.getElementById("modelActionStrip");
+        var timeline = document.getElementById("modelTimeline");
+        var timeReadout = document.getElementById("modelTimeReadout");
+        var loopButton = document.getElementById("modelLoopToggle");
+        var rateButtons = Array.prototype.slice.call(document.querySelectorAll("[data-playback-rate]"));
         var faceControls = document.getElementById("modelFaceControls");
         var faceInterface = document.getElementById("modelFaceInterface");
         var faceAutoButton = document.getElementById("modelFaceAuto");
@@ -535,6 +609,13 @@
             var motionEnabled = true;
             var activeAction = "idle";
             var actionChosenByUser = false;
+            var playbackRate = 1;
+            var loopPlayback = true;
+            // 大招 GLB 只下载一次，无论用户点哪一段。
+            var skillClipsRequested = false;
+            var skillLoader = null;
+            // 拖时间轴时不能让渲染循环把滑块拽回去。
+            var scrubbing = false;
             var faceFollowsAction = true;
             var activeFaceSelection = null;
             var nextBlinkAt = window.performance.now() + 2800;
@@ -717,24 +798,46 @@
                 resetView();
             }
 
+            var ACTION_LABELS = {
+                room_idle_L: "房间待机",
+                idle: "战斗待机",
+                attack: "普通攻击",
+                class_skill_1: "职业技能 1",
+                class_skill_2: "职业技能 2",
+                class_skill_3: "职业技能 3",
+                battle_run: "战斗跑动",
+                damage: "受击",
+                kirarajump_0: "跳跃",
+                win_st_0: "胜利",
+                charge_skill: "技能蓄力",
+                skill: "とっておき 大招",
+                chara_skill_1: "角色技能",
+                skill_0: "技能 1",
+                skill_1: "技能 2",
+                dead: "倒下",
+                abnormal: "异常状态"
+            };
+
             function friendlyActionName(name) {
-                return {
-                    room_idle_L: "待机",
-                    idle: "待机",
-                    attack: "普通攻击",
-                    class_skill_1: "职业技能 1",
-                    class_skill_2: "职业技能 2",
-                    class_skill_3: "职业技能 3",
-                    battle_run: "战斗跑动",
-                    damage: "受击",
-                    kirarajump_0: "跳跃",
-                    win_st_0: "胜利",
-                    charge_skill: "技能蓄力",
-                    skill_0: "技能 1",
-                    skill_1: "技能 2",
-                    dead: "倒下",
-                    abnormal: "异常状态"
-                }[name] || name.replace(/_/g, " ");
+                return ACTION_LABELS[name] || name.replace(/_/g, " ");
+            }
+
+            // 分组顺序即渲染顺序。大招单独一组并置顶，因为那是用户最想看的一段，
+            // 也是唯一需要按需下载的一段。
+            var ACTION_GROUPS = [
+                { key: "ultimate", label: "必杀演出", note: "とっておき", names: ["skill", "chara_skill_1"] },
+                { key: "daily", label: "日常", note: "待机与移动", names: ["room_idle_L", "idle", "battle_run", "kirarajump_0", "win_st_0"] },
+                { key: "battle", label: "战斗", note: "攻击与职业技能", names: ["attack", "class_skill_1", "class_skill_2", "class_skill_3", "charge_skill", "skill_0", "skill_1"] },
+                { key: "state", label: "状态", note: "受击与异常", names: ["damage", "abnormal", "dead"] }
+            ];
+
+            function actionGroupOf(name) {
+                for (var i = 0; i < ACTION_GROUPS.length; i++) {
+                    if (ACTION_GROUPS[i].names.indexOf(name) >= 0) {
+                        return ACTION_GROUPS[i].key;
+                    }
+                }
+                return "other";
             }
 
             function mountActionControls(clips) {
@@ -756,33 +859,125 @@
                         { name: "abnormal" }
                     ];
                 }
-                actionStrip.querySelectorAll("button").forEach(function (button) { button.remove(); });
-                actionButtons = [];
-                var actionOrder = ["idle", "attack", "class_skill_1", "class_skill_2", "class_skill_3", "battle_run", "damage", "kirarajump_0", "win_st_0", "abnormal", "dead", "room_idle_L"];
-                displayClips.sort(function (left, right) {
-                    var leftIndex = actionOrder.indexOf(left.name);
-                    var rightIndex = actionOrder.indexOf(right.name);
-                    return (leftIndex < 0 ? actionOrder.length : leftIndex) - (rightIndex < 0 ? actionOrder.length : rightIndex);
-                }).forEach(function (clip, index) {
-                    var button = document.createElement("button");
-                    button.type = "button";
-                    button.dataset.modelAction = clip.name;
-                    button.dataset.clip = clip.name;
-                    button.setAttribute("aria-pressed", String(index === 0));
-                    button.innerHTML = escapeHtml(friendlyActionName(clip.name)) + "<small>" + escapeHtml(clip.name) + "</small>";
-                    button.addEventListener("click", function () {
-                        actionChosenByUser = true;
-                        if (!motionEnabled && motionButton) {
-                            motionEnabled = true;
-                            motionButton.setAttribute("aria-pressed", "true");
-                            motionButton.textContent = "暂停动作";
-                            mixer.timeScale = 1;
+                // 大招是独立 GLB，约 180 KiB，只在用户点它时才下载。这里先按
+                // 目录里声明的名字挂占位按钮，点下去再取。
+                var skillSource = skillActionSource();
+                var pending = {};
+                if (skillSource && !skillClipsRequested) {
+                    (skillSource.animations || []).forEach(function (name) {
+                        if (!clipByName[name]) {
+                            pending[name] = true;
+                            displayClips.push({ name: name });
                         }
-                        selectAction(clip.name);
                     });
-                    actionButtons.push(button);
-                    actionStrip.appendChild(button);
+                }
+                actionStrip.innerHTML = "";
+                actionButtons = [];
+                var byGroup = {};
+                displayClips.forEach(function (clip) {
+                    var key = actionGroupOf(clip.name);
+                    (byGroup[key] = byGroup[key] || []).push(clip);
                 });
+                var groups = ACTION_GROUPS.concat([{ key: "other", label: "其它", note: "包内其余片段", names: [] }]);
+                groups.forEach(function (group) {
+                    var groupClips = byGroup[group.key];
+                    if (!groupClips || !groupClips.length) {
+                        return;
+                    }
+                    groupClips.sort(function (left, right) {
+                        var leftIndex = group.names.indexOf(left.name);
+                        var rightIndex = group.names.indexOf(right.name);
+                        return (leftIndex < 0 ? group.names.length : leftIndex) - (rightIndex < 0 ? group.names.length : rightIndex);
+                    });
+                    var section = document.createElement("section");
+                    section.className = "model-action-group";
+                    section.dataset.actionGroup = group.key;
+                    var heading = document.createElement("div");
+                    heading.className = "model-control-heading";
+                    heading.innerHTML = "<strong>" + escapeHtml(group.label) + "</strong><small>" + escapeHtml(group.note) + "</small>";
+                    section.appendChild(heading);
+                    var strip = document.createElement("div");
+                    strip.className = "model-action-strip";
+                    strip.setAttribute("role", "group");
+                    strip.setAttribute("aria-label", group.label + "动作");
+                    groupClips.forEach(function (clip) {
+                        var button = document.createElement("button");
+                        button.type = "button";
+                        button.dataset.modelAction = clip.name;
+                        button.dataset.clip = clip.name;
+                        var isActive = clip.name === activeAction;
+                        button.className = isActive ? "is-active" : "";
+                        button.setAttribute("aria-pressed", String(isActive));
+                        button.innerHTML = escapeHtml(friendlyActionName(clip.name)) + "<small>" + escapeHtml(clip.name) + "</small>";
+                        if (pending[clip.name]) {
+                            button.classList.add("is-pending");
+                            button.title = "首次播放需要下载这段演出";
+                        }
+                        button.addEventListener("click", function () {
+                            actionChosenByUser = true;
+                            setMotionEnabled(true);
+                            if (pending[clip.name]) {
+                                requestSkillClips(clip.name, button);
+                                return;
+                            }
+                            selectAction(clip.name);
+                        });
+                        actionButtons.push(button);
+                        strip.appendChild(button);
+                    });
+                    section.appendChild(strip);
+                    actionStrip.appendChild(section);
+                });
+            }
+
+            function requestSkillClips(wanted, button) {
+                if (skillClipsRequested) {
+                    return;
+                }
+                skillClipsRequested = true;
+                button.classList.add("is-loading");
+                button.disabled = true;
+                loadSkillActionClips(skillLoader).then(function (skillClips) {
+                    if (disposed) {
+                        return;
+                    }
+                    var merged = [];
+                    skillClips.forEach(function (clip) {
+                        if (!clipByName[clip.name]) {
+                            clipByName[clip.name] = clip;
+                        }
+                    });
+                    Object.keys(clipByName).forEach(function (name) {
+                        merged.push(clipByName[name]);
+                    });
+                    activeAction = clipByName[wanted] ? wanted : activeAction;
+                    mountActionControls(merged);
+                    if (clipByName[wanted]) {
+                        selectAction(wanted);
+                    } else {
+                        // 目录声明了这段演出但取回失败，按钮就不该继续假装可播。
+                        skillClipsRequested = true;
+                    }
+                }).catch(function () {
+                    if (!disposed) {
+                        button.classList.remove("is-loading");
+                        button.disabled = false;
+                        skillClipsRequested = false;
+                    }
+                });
+            }
+
+            function setMotionEnabled(enabled) {
+                motionEnabled = enabled;
+                if (mixer) {
+                    mixer.timeScale = enabled ? playbackRate : 0;
+                }
+                if (motionButton) {
+                    motionButton.setAttribute("aria-pressed", String(enabled));
+                    motionButton.classList.toggle("is-paused", !enabled);
+                    motionButton.title = enabled ? "暂停（空格）" : "播放（空格）";
+                    motionButton.innerHTML = "<span aria-hidden='true'>" + (enabled ? "❙❙" : "▶") + "</span>";
+                }
             }
 
             // Enemy sprites ship multiple expression states per feature plus a
@@ -984,14 +1179,96 @@
                 }
                 var clip = clipByName[selectedButton.dataset.clip];
                 if (!clip) {
+                    // 敌人程序化预览没有 AnimationClip，也就没有时间轴可拖。
+                    if (activeClipAction) {
+                        activeClipAction.fadeOut(0.18);
+                        activeClipAction = null;
+                    }
+                    updateTransport(true);
                     return;
                 }
                 var nextAction = mixer.clipAction(clip);
-                nextAction.reset().setLoop(THREE.LoopRepeat, Infinity).fadeIn(0.18).play();
+                nextAction.reset();
+                applyLoopMode(nextAction);
+                nextAction.fadeIn(0.18).play();
                 if (activeClipAction && activeClipAction !== nextAction) {
                     activeClipAction.fadeOut(0.18);
                 }
                 activeClipAction = nextAction;
+                updateTransport(true);
+            }
+
+            function applyLoopMode(action) {
+                if (loopPlayback) {
+                    action.setLoop(THREE.LoopRepeat, Infinity);
+                    action.clampWhenFinished = false;
+                } else {
+                    // 单次播放要停在最后一帧，否则大招放完角色会瞬间弹回第一帧。
+                    action.setLoop(THREE.LoopOnce, 1);
+                    action.clampWhenFinished = true;
+                }
+            }
+
+            function formatSeconds(value) {
+                return (Math.round(value * 100) / 100).toFixed(2);
+            }
+
+            function updateTransport(force) {
+                if (!timeline || !timeReadout) {
+                    return;
+                }
+                var clip = activeClipAction && activeClipAction.getClip();
+                var duration = clip ? clip.duration : 0;
+                if (!duration) {
+                    if (force) {
+                        timeline.value = "0";
+                        timeline.disabled = true;
+                        timeReadout.textContent = "程序化预览";
+                    }
+                    return;
+                }
+                timeline.disabled = false;
+                var elapsed = duration > 0 ? activeClipAction.time % duration : 0;
+                if (!scrubbing) {
+                    timeline.value = String(Math.round(elapsed / duration * 1000));
+                }
+                timeReadout.textContent = formatSeconds(elapsed) + " / " + formatSeconds(duration) + " s";
+            }
+
+            function scrubTo(ratio) {
+                if (!activeClipAction) {
+                    return;
+                }
+                var clip = activeClipAction.getClip();
+                if (!clip || !clip.duration) {
+                    return;
+                }
+                activeClipAction.paused = false;
+                activeClipAction.time = Math.max(0, Math.min(clip.duration, ratio * clip.duration));
+                // timeScale 为 0 时 mixer.update 不会推进，但仍会把新时间写进骨骼。
+                mixer.update(0);
+                // 拖到某一帧时表情也要跟到那一帧，否则大招中段的表情是错的。
+                updateFacialFromClip();
+                updateTransport();
+            }
+
+            function nudgeFrame(direction) {
+                if (!activeClipAction) {
+                    return;
+                }
+                var clip = activeClipAction.getClip();
+                if (!clip || !clip.duration) {
+                    return;
+                }
+                setMotionEnabled(false);
+                var step = 1 / 30;
+                var next = activeClipAction.time + direction * step;
+                if (next < 0) {
+                    next += clip.duration;
+                } else if (next > clip.duration) {
+                    next -= clip.duration;
+                }
+                scrubTo(next / clip.duration);
             }
 
             function applyFaceSelection(selectedParts, presetName, automatic, updateControls) {
@@ -1250,7 +1527,13 @@
                     button.dataset.facialState = String(index);
                     button.setAttribute("aria-pressed", "false");
                     button.textContent = facialStateLabel(index);
-                    button.title = "表情 " + (index + 1) + " / " + facialTable.states.length;
+                    // 多数状态只能按编号叫（层名的字母在每个角色身上含义都不同），
+                    // 所以把它实际点亮的层写进 tooltip，让编号至少可以被辨认。
+                    var layers = (facialTable.states[index] || [])
+                        .map(function (layerIndex) { return facialTable.layers[layerIndex]; })
+                        .filter(Boolean);
+                    button.title = "表情 " + (index + 1) + " / " + facialTable.states.length
+                        + (layers.length ? "\n" + layers.join(" + ") : "");
                     button.addEventListener("click", function () {
                         applyFacialState(index, false);
                     });
@@ -1730,6 +2013,26 @@
                 var headId = Number.isFinite(metadata.headId) ? metadata.headId : 0;
                 var source = CLASS_ACTION_PREVIEWS[String(metadata.class) + ":" + headId]
                     || CLASS_ACTION_PREVIEWS[String(metadata.class) + ":0"];
+                return loadRetargetedClips(loader, source, "职业动作");
+            }
+
+            // とっておき and the character's own battle skill, from the GLB
+            // tools/build_skill_action_catalog.py publishes for this model id.
+            // Fetched only when asked for: each is ~180 KiB, far more than the
+            // shared class actions, because the clips run 15 seconds.
+            function skillActionSource() {
+                // The catalog is keyed by the numeric model id, which the only
+                // identifier in scope here carries: preview.file always reads
+                // asset/models/model_pl_<id>/model.glb.gz.
+                var match = /model_pl_(\d+)/.exec(String(preview.file || ""));
+                return (match && SKILL_ACTION_PREVIEWS[match[1]]) || null;
+            }
+
+            function loadSkillActionClips(loader) {
+                return loadRetargetedClips(loader, skillActionSource(), "大招动作");
+            }
+
+            function loadRetargetedClips(loader, source, what) {
                 if (!source) {
                     return Promise.resolve([]);
                 }
@@ -1780,7 +2083,7 @@
                                 }).filter(function (clip) { return clip.tracks.length > 0; });
                                 resolve(clips);
                             } catch (error) {
-                                console.warn("职业动作载入失败", error);
+                                console.warn(what + "载入失败", error);
                                 resolve([]);
                             } finally {
                                 disposeObjectResources(actionGltf.scene);
@@ -1806,6 +2109,8 @@
             cacheModel(preview.file, preview.compression).then(function (sourceUrl) {
                 var loader = new GLTFLoader();
                 loader.setMeshoptDecoder(MeshoptDecoder);
+                // 大招按需加载时要用同一个 loader（已装好 meshopt 解码器）。
+                skillLoader = loader;
                 loader.load(sourceUrl, function (gltf) {
                     if (disposed) {
                         return;
@@ -1931,6 +2236,44 @@
                                     .map(function (i) { return facialTable.layers[i]; })
                             };
                         };
+                        // The skill clips are retargeted onto this model's bones by
+                        // uuid, so nothing about them is visible in the DOM. This
+                        // reports how many tracks actually bound and how far the rig
+                        // travels across the clip, which is what tells a real
+                        // retarget from a clip that loaded and drives nothing.
+                        window.__clipDebug = function (name) {
+                            var clip = clipByName[name];
+                            if (!clip) {
+                                return { known: Object.keys(clipByName) };
+                            }
+                            var bound = 0;
+                            clip.tracks.forEach(function (track) {
+                                var binding = THREE.PropertyBinding.parseTrackName(track.name);
+                                if (THREE.PropertyBinding.findNode(modelObject, binding.nodeName)) {
+                                    bound += 1;
+                                }
+                            });
+                            var action = mixer.clipAction(clip);
+                            var previous = activeClipAction;
+                            if (previous && previous !== action) {
+                                previous.stop();
+                            }
+                            action.reset().play();
+                            var samples = [0, 0.25, 0.5, 0.75].map(function (fraction) {
+                                action.time = clip.duration * fraction;
+                                mixer.update(0);
+                                modelObject.updateMatrixWorld(true);
+                                var box = new THREE.Box3().setFromObject(modelObject);
+                                return [Number(box.min.y.toFixed(4)), Number(box.max.y.toFixed(4)),
+                                        Number(box.max.x.toFixed(4))];
+                            });
+                            action.stop();
+                            if (previous && previous !== action) {
+                                previous.reset().play();
+                                mixer.update(0);
+                            }
+                            return { tracks: clip.tracks.length, bound: bound, duration: clip.duration, samples: samples };
+                        };
                         window.__facialDebug = function () {
                             return {
                                 table: facialTable,
@@ -2043,23 +2386,109 @@
 
             if (motionButton) {
                 motionButton.addEventListener("click", function () {
-                    motionEnabled = !motionEnabled;
-                    motionButton.setAttribute("aria-pressed", String(motionEnabled));
-                    motionButton.textContent = motionEnabled ? "暂停动作" : "恢复动作";
-                    if (mixer) {
-                        mixer.timeScale = motionEnabled ? 1 : 0;
+                    setMotionEnabled(!motionEnabled);
+                });
+            }
+            if (timeline) {
+                timeline.addEventListener("pointerdown", function () { scrubbing = true; });
+                timeline.addEventListener("input", function () {
+                    scrubbing = true;
+                    // 拖动即暂停，否则松手瞬间动作会从拖到的位置继续跑，看不清单帧。
+                    setMotionEnabled(false);
+                    scrubTo(Number(timeline.value) / 1000);
+                });
+                ["pointerup", "pointercancel", "blur"].forEach(function (event) {
+                    timeline.addEventListener(event, function () { scrubbing = false; });
+                });
+            }
+            rateButtons.forEach(function (button) {
+                button.addEventListener("click", function () {
+                    playbackRate = Number(button.dataset.playbackRate) || 1;
+                    rateButtons.forEach(function (other) {
+                        var isActive = other === button;
+                        other.classList.toggle("is-active", isActive);
+                        other.setAttribute("aria-pressed", String(isActive));
+                    });
+                    setMotionEnabled(true);
+                });
+            });
+            if (loopButton) {
+                loopButton.addEventListener("click", function () {
+                    loopPlayback = !loopPlayback;
+                    loopButton.classList.toggle("is-active", loopPlayback);
+                    loopButton.setAttribute("aria-pressed", String(loopPlayback));
+                    loopButton.title = loopPlayback ? "循环播放（L）" : "单次播放（L）";
+                    if (activeClipAction) {
+                        applyLoopMode(activeClipAction);
+                        activeClipAction.reset().play();
+                        setMotionEnabled(true);
                     }
                 });
             }
-            resetButton.addEventListener("click", function () {
+            resetButton.addEventListener("click", resetViewerState);
+
+            function resetViewerState() {
                 resetModelTransform();
                 resetView();
+                if (scaleRange) {
+                    scaleRange.value = "100";
+                    scaleValue.textContent = "100%";
+                }
+                if (verticalRange) {
+                    verticalRange.value = "0";
+                    verticalValue.textContent = "0";
+                }
+                setMotionEnabled(true);
                 if (clipByName.idle) {
                     selectAction("idle");
                 } else if (clipByName.room_idle_L) {
                     selectAction("room_idle_L");
                 }
-            });
+            }
+
+            // 快捷键只在观察台可见、且焦点不在输入控件里时生效。
+            function onViewerKeydown(event) {
+                if (disposed || !document.body.contains(host)) {
+                    return;
+                }
+                if (event.metaKey || event.ctrlKey || event.altKey) {
+                    return;
+                }
+                var target = event.target;
+                var tag = target && target.tagName ? target.tagName.toLowerCase() : "";
+                if (tag === "input" || tag === "textarea" || tag === "select" || (target && target.isContentEditable)) {
+                    return;
+                }
+                var handled = true;
+                switch (event.key) {
+                    case " ":
+                    case "Spacebar":
+                        setMotionEnabled(!motionEnabled);
+                        break;
+                    case "ArrowLeft":
+                        nudgeFrame(-1);
+                        break;
+                    case "ArrowRight":
+                        nudgeFrame(1);
+                        break;
+                    case "l":
+                    case "L":
+                        if (loopButton) {
+                            loopButton.click();
+                        }
+                        break;
+                    case "r":
+                    case "R":
+                        resetViewerState();
+                        break;
+                    default:
+                        handled = false;
+                }
+                if (handled) {
+                    event.preventDefault();
+                }
+            }
+            window.addEventListener("keydown", onViewerKeydown);
             if (adjustButton && adjustDrawer) {
                 adjustButton.addEventListener("click", function () {
                     var expanded = adjustButton.getAttribute("aria-expanded") !== "true";
@@ -2108,6 +2537,7 @@
                 previousFrame = time;
                 if (mixer && motionEnabled) {
                     mixer.update(delta);
+                    updateTransport();
                 }
                 updateEnemyProceduralMotion(delta);
                 if (facialTable) {
@@ -2144,6 +2574,7 @@
             activeModelCleanup = function () {
                 disposed = true;
                 window.cancelAnimationFrame(animationFrame);
+                window.removeEventListener("keydown", onViewerKeydown);
                 controls.dispose();
                 if (mixer) {
                     mixer.stopAllAction();
@@ -2375,6 +2806,9 @@
             });
             Object.keys(manifest.classActions || {}).forEach(function (classId) {
                 CLASS_ACTION_PREVIEWS[classId] = manifest.classActions[classId];
+            });
+            Object.keys(manifest.skillActions || {}).forEach(function (modelId) {
+                SKILL_ACTION_PREVIEWS[modelId] = manifest.skillActions[modelId];
             });
             if (manifest.facialActions) {
                 FACIAL_ACTIONS_URL = manifest.facialActions;
