@@ -2,10 +2,18 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "kirafan-dev",
+      "name": "kirafan-static",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "8642"],
-      "port": 8642
+      "runtimeArgs": ["tools/serve.py", "8643"],
+      "port": 8643,
+      "autoPort": false
+    },
+    {
+      "name": "kirafan-static-alt",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["tools/serve.py", "8644"],
+      "port": 8644,
+      "autoPort": false
     }
   ]
 }

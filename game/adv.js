@@ -124,6 +124,8 @@ function boot() {
 function start() {
     // Must be inside the click handler: this is the gesture that unlocks audio.
     audio.unlock();
+    // Anything the stage queued while audio was locked can sound now.
+    if (stage.flushSe) { stage.flushSe(); }
     gate.remove();
 
     view = adv.createView(document.getElementById("ui"));

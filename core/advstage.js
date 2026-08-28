@@ -634,15 +634,29 @@ export function create(options) {
             audio.bgm(track, { fade: fade });
         },
 
-        // Sound effects are extracted as cue names but the CRIWARE payload is
-        // not decodable yet, so this records the cue instead of dropping it --
-        // when the decoder lands, every scene already asks for the right ones.
-        se: function (name) {
-            if (audio.se) {
-                audio.se(name);
+        // The game's own SE are gone with its CDN (see core/audio.js), so these
+        // cue names drive synthesised effects instead. A cue that arrives before
+        // the audio unlock is still recorded rather than dropped: the gesture is
+        // usually one click away, and a scene that opens on a sound should not
+        // lose it.
+        se: function (name, command) {
+            if (!audio.se) { return; }
+            if (!audio.isUnlocked()) {
+                (stage.pendingSe = stage.pendingSe || []).push(name);
                 return;
             }
-            (stage.pendingSe = stage.pendingSe || []).push(name);
+            audio.se(name, command);
+        },
+
+        // Play back anything queued before the unlock, then clear it. Called by
+        // whichever control unlocks audio.
+        flushSe: function () {
+            const queued = stage.pendingSe;
+            stage.pendingSe = null;
+            if (!queued || !audio.se || !audio.isUnlocked()) { return; }
+            // Only the last cue fires. Replaying a backlog all at once would be a
+            // burst of unrelated noise, and the earlier ones are already stale.
+            audio.se(queued[queued.length - 1]);
         },
 
         // Advance animation and transitions. The game's own loop drives this.
