@@ -29,6 +29,9 @@ COMPONENT_UNSIGNED_SHORT = 5123
 COMPONENT_UNSIGNED_INT = 5125
 TARGET_ARRAY_BUFFER = 34962
 TARGET_ELEMENT_ARRAY_BUFFER = 34963
+# MsbMaterialHandler.MsbMaterialParam.m_AlphaTestRefValue, which every bundle
+# sampled so far leaves at its 0.01f default.
+ALPHA_TEST_REF = 0.01
 
 
 def pptr_id(value: Any) -> int:
@@ -329,7 +332,14 @@ class KirafanExporter:
                 # Reflected and mirrored sprite planes do not keep a uniform
                 # winding direction after conversion, so preserve both faces.
                 "doubleSided": True,
-                "alphaMode": "BLEND",
+                # The source materials do not blend: their Unity floats read
+                # _Mode=0 (opaque), _SrcBlend=One/_DstBlend=Zero, _ZWrite=1,
+                # and MsbHandler supplies m_AlphaTestRefValue=0.01.  Blending
+                # them made the first-drawn layer blend its anti-aliased edge
+                # against the background and then write depth, leaving a dark
+                # seam wherever a later layer sat behind it.
+                "alphaMode": "MASK",
+                "alphaCutoff": ALPHA_TEST_REF,
                 "pbrMetallicRoughness": {
                     "baseColorTexture": {"index": texture_index},
                     "metallicFactor": 0,
@@ -340,6 +350,41 @@ class KirafanExporter:
             self.builder.document["materials"].append(material)
             result[kind] = len(self.builder.document["materials"]) - 1
         return result
+
+    @staticmethod
+    def material_floats(material: Any) -> dict[str, float]:
+        floats: dict[str, float] = {}
+        for key, value in material.m_SavedProperties.m_Floats:
+            floats[key if isinstance(key, str) else key.name] = float(value)
+        return floats
+
+    @classmethod
+    def alpha_state(cls, material: Any) -> dict[str, Any]:
+        """Translate a Unity material's blend floats into glTF alpha state.
+
+        The main character materials read _Mode=0 with _SrcBlend=One and
+        _DstBlend=Zero, meaning no blending at all -- they only cut fully
+        transparent texels away, at MsbHandler's m_AlphaTestRefValue.  The
+        "_outline" materials read _Mode=3 with _DstBlend=OneMinusSrcAlpha and
+        _ZWrite=0, and those really are translucent.
+        """
+        floats = cls.material_floats(material)
+        mode = floats.get("_Mode", 0.0)
+        dst = floats.get("_DstBlend", 0.0)
+        z_write = floats.get("_ZWrite", 1.0)
+        # UnityEngine.Rendering.BlendMode.Zero is 0; anything else blends.
+        blends = mode >= 2.0 or dst != 0.0
+        if blends:
+            return {"alphaMode": "BLEND", "extras": {"depthWrite": z_write != 0.0}}
+        cutoff = floats.get("_AlphaTestRefValue", floats.get("_Cutoff", ALPHA_TEST_REF))
+        # _Cutoff defaults to 0.5, which would eat the anti-aliased sprite edge.
+        if cutoff >= 0.5:
+            cutoff = ALPHA_TEST_REF
+        return {
+            "alphaMode": "MASK",
+            "alphaCutoff": cutoff,
+            "extras": {"depthWrite": z_write != 0.0},
+        }
 
     def add_generic_materials(self) -> dict[int, int]:
         result: dict[int, int] = {}
@@ -369,19 +414,18 @@ class KirafanExporter:
                     alpha = alpha.resize(image.size, Image.Resampling.NEAREST)
                 image.putalpha(alpha)
             texture_index = self.builder.add_png(image, material.m_Name)
-            self.builder.document["materials"].append(
-                {
-                    "name": material.m_Name,
-                    "doubleSided": True,
-                    "alphaMode": "BLEND",
-                    "pbrMetallicRoughness": {
-                        "baseColorTexture": {"index": texture_index},
-                        "metallicFactor": 0,
-                        "roughnessFactor": 1,
-                    },
-                    "extensions": {"KHR_materials_unlit": {}},
-                }
-            )
+            entry = {
+                "name": material.m_Name,
+                "doubleSided": True,
+                "pbrMetallicRoughness": {
+                    "baseColorTexture": {"index": texture_index},
+                    "metallicFactor": 0,
+                    "roughnessFactor": 1,
+                },
+                "extensions": {"KHR_materials_unlit": {}},
+            }
+            entry.update(self.alpha_state(material))
+            self.builder.document["materials"].append(entry)
             result[item.path_id] = len(self.builder.document["materials"]) - 1
         return result
 

@@ -1373,7 +1373,9 @@
                                     part.scale.setScalar(1);
                                     part.traverse(function (child) {
                                         if (child.isMesh && child.material) {
-                                            child.material.transparent = true;
+                                            // Opaque with an alpha cut, matching the
+                                            // character materials above.
+                                            child.material.transparent = false;
                                             child.material.alphaTest = 0.015;
                                             child.material.depthWrite = true;
                                             child.material.depthTest = true;
@@ -1526,26 +1528,44 @@
                             }
                         }
                         if (child.isMesh && child.material) {
-                            // The original player shader uses SrcAlpha blending
-                            // with depth writes and depth testing.  The converted
-                            // meshes stay double-sided because mirrored left/right
+                            // Each bundle carries two kinds of material, and the
+                            // Unity material floats say they render differently.
+                            //
+                            // The main body/head materials do not blend at all:
+                            // _Mode=0 (opaque), _SrcBlend=One/_DstBlend=Zero,
+                            // _ZWrite=1, with MsbHandler supplying
+                            // m_AlphaTestRefValue=0.01.  Blending them put every
+                            // layer in three.js's transparent queue, where the
+                            // first-drawn piece blended its anti-aliased edge
+                            // against the background and then wrote depth, so
+                            // later layers behind it were depth-rejected and the
+                            // edge kept that background colour.  That is the dark
+                            // seam where model_pl_140007's hat brim meets the hair
+                            // (hat_L draws at renderOrder 2, the hair at 4152 up).
+                            //
+                            // The "_outline" material is the genuinely translucent
+                            // one (_Mode=3, _DstBlend=OneMinusSrcAlpha, _ZWrite=0)
+                            // and covers the pieces meant to read as see-through —
+                            // on 140007 that is the crystal ball, the far arm and
+                            // the sleeves.  It must keep blending and must not
+                            // write depth.
+                            //
+                            // Meshes stay double-sided because mirrored left/right
                             // pieces do not share a reliable GLB winding direction.
-                            child.material.transparent = true;
-                            child.material.alphaTest = 0.01;
-                            child.material.depthWrite = preview.depthWrite !== false;
+                            var blended = /_outline$/i.test(child.material.name || "");
+                            child.material.transparent = blended;
+                            child.material.alphaTest = blended ? 0 : 0.01;
+                            child.material.depthWrite = !blended
+                                && preview.depthWrite !== false;
                             child.material.depthTest = true;
                             // Weapons carry their cartoon outline as an inverted
                             // hull mapped to a black texel, so they must cull
                             // back faces or the shell hides the weapon.
                             child.material.side = modelKind === "weapon" ? THREE.FrontSide : THREE.DoubleSide;
+                            // Kept for the layers the atlas really does blend
+                            // (m_eRenderStage 7 draws behind the body), and as the
+                            // tie-break the engine authored via m_HieIndex.
                             child.renderOrder = resolveRenderOrder(child);
-                            // Two-dimensional sprite layers rely on their source
-                            // draw order, but half the models draw many of those
-                            // layers at the same renderOrder, so disabling depth
-                            // writes made layers collide and flash through each
-                            // other. Keep writing depth (the converted source
-                            // does) so closer layers still occlude further ones.
-                            child.material.depthWrite = preview.depthWrite !== false;
                             // Skinned vertices follow their bones, but frustum
                             // culling uses the node's bounding sphere, which
                             // stays at the skeleton origin for these exports —
@@ -1553,11 +1573,6 @@
                             // mouths. Skinned pieces must never be culled.
                             if (child.isSkinnedMesh) {
                                 child.frustumCulled = false;
-                            }
-                            if (isPlayer && /hand/.test(loweredName)) {
-                                child.material = child.material.clone();
-                                child.material.transparent = false;
-                                child.material.alphaTest = 0;
                             }
                         }
                         var facePart = child.userData && child.userData.facePart;
