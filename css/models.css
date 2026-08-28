@@ -337,3 +337,61 @@ main { width: min(1440px, calc(100% - 40px)); margin: 0 auto; padding: 34px 0 54
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
+
+/* 铺满窗口模式。
+   观察台默认排在 topbar / hero / toolbar / status 之后，而 .models-browser 自带
+   clamp(760px, 88vh, 980px) 高度，页面总高一定超出视口——要点右侧控制台就得先
+   拖页面滚动条，且面板底部仍被裁掉。铺满后观察台成为占满视口的固定层，舞台和
+   控制台同时完整可见，页面滚动条不再参与操作。 */
+body.model-focus-mode { overflow: hidden; }
+/* 固定层由观察台自己承担，其余版面留在原位即可，不必重排。 */
+body.model-focus-mode .model-3d-card.is-focus {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    display: grid;
+    /* 工具条高度自适应，剩下的全部给 layout，所以不会出现内容被挤掉的情况。 */
+    grid-template-rows: auto minmax(0, 1fr);
+}
+/* 关键一行：默认的 clamp() 固定高度会让 grid 溢出视口，这里必须交回给 1fr。 */
+body.model-focus-mode .model-3d-card.is-focus .model-viewer-layout {
+    height: auto;
+    min-height: 0;
+}
+/* 控制台在窄窗口下仍可能超长，让它自己滚，而不是把页面撑高。 */
+body.model-focus-mode .model-3d-card.is-focus .model-inspector-body {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+/* 铺满时给舞台更多横向空间：素材是 512px 贴图，画得越大越依赖采样质量，
+   面板占比小一点，角色就能拿到更多实际像素。 */
+/* 铺满时整个视口都归观察台，没有 hero 和列表面板来抢宽度，所以左右分栏能撑到
+   比默认布局窄得多的窗口。默认布局在 1180px 以下就折成单栏，铺满模式不该跟着
+   折——那会把控制台压成视口底部一条 238px 高的窄带，正是要修掉的问题。 */
+@media (min-width: 820px) {
+    body.model-focus-mode .model-3d-card.is-focus .model-viewer-layout {
+        grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
+    }
+    /* 窄屏那套规则给舞台定了 clamp(480px, 62svh, 640px) 的固定高度，配合原来的
+       整页滚动是对的；铺满模式下它会让舞台停在 490px，把 728px 的行空出一大截。
+       高度必须交回给 grid 行。 */
+    body.model-focus-mode .model-3d-card.is-focus .model-viewer-stage {
+        height: auto;
+        min-height: 0;
+    }
+    /* 同理：控制台在窄屏被改成 auto auto 且不限高（因为原本靠整页滚动），
+       铺满后必须回到"页签固定、内容区自己滚"。 */
+    body.model-focus-mode .model-3d-card.is-focus .model-viewer-inspector {
+        grid-template-rows: auto minmax(0, 1fr);
+        max-height: none;
+        border-top: 0;
+        border-left: 1px solid rgba(255,255,255,0.11);
+    }
+    body.model-focus-mode .model-3d-card.is-focus .model-inspector-body {
+        overflow-y: auto;
+    }
+}

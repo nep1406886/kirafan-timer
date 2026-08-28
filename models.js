@@ -430,7 +430,7 @@
                 + "</div>"
             : "";
         var previewMarkup = preview
-            ? "<section class='model-3d-card' aria-label='游戏模型预览'><div class='model-3d-toolbar'><div><span class='model-live-badge'><i aria-hidden='true'></i>LIVE WEBGL</span><strong>模型观察台</strong><small>" + escapeHtml(preview.label) + "</small></div><div class='model-3d-actions'><span class='model-shortcut-hint'>空格播放 · ←→ 逐帧 · R 重置</span><button id='modelViewReset' type='button' title='恢复模型位置和镜头（R）'><span aria-hidden='true'>↺</span> 重置</button></div></div><div class='model-viewer-layout'><div class='model-viewer-stage'><div id='model3dCanvas' class='model-3d-canvas'><div class='model-3d-loading'><span class='model-spinner' aria-hidden='true'></span><p>正在读取模型数据……</p></div></div>" + transportMarkup + "</div><aside class='model-viewer-inspector' aria-label='模型控制台'>" + tabsMarkup + "<div class='model-inspector-body'>" + actionMarkup + faceMarkup + setupMarkup + "</div></aside></div></section>"
+            ? "<section class='model-3d-card' aria-label='游戏模型预览'><div class='model-3d-toolbar'><div><span class='model-live-badge'><i aria-hidden='true'></i>LIVE WEBGL</span><strong>模型观察台</strong><small>" + escapeHtml(preview.label) + "</small></div><div class='model-3d-actions'><span class='model-shortcut-hint'>空格播放 · ←→ 逐帧 · R 重置 · F 全屏</span><button id='modelFocusToggle' type='button' aria-pressed='false' title='铺满窗口，不用页面滚动条操作（F）'><span aria-hidden='true'>⛶</span> 铺满窗口</button><button id='modelViewReset' type='button' title='恢复模型位置和镜头（R）'><span aria-hidden='true'>↺</span> 重置</button></div></div><div class='model-viewer-layout'><div class='model-viewer-stage'><div id='model3dCanvas' class='model-3d-canvas'><div class='model-3d-loading'><span class='model-spinner' aria-hidden='true'></span><p>正在读取模型数据……</p></div></div>" + transportMarkup + "</div><aside class='model-viewer-inspector' aria-label='模型控制台'>" + tabsMarkup + "<div class='model-inspector-body'>" + actionMarkup + faceMarkup + setupMarkup + "</div></aside></div></section>"
             : unavailableMarkup;
         var identityMarkup = metadata
             ? "<span>作品 <strong>" + escapeHtml(bilingualLabel(metadata.titleZh, metadata.title)) + "</strong></span><span>角色 <strong>" + escapeHtml(bilingualLabel(metadata.characterZh, metadata.character)) + "</strong></span>"
@@ -576,6 +576,7 @@
         var host = document.getElementById("model3dCanvas");
         var motionButton = document.getElementById("modelMotionToggle");
         var resetButton = document.getElementById("modelViewReset");
+        var focusButton = document.getElementById("modelFocusToggle");
         var adjustButton = document.getElementById("modelAdjustToggle");
         var adjustDrawer = document.getElementById("modelAdjustDrawer");
         var scaleRange = document.getElementById("modelScaleRange");
@@ -2501,6 +2502,40 @@
                 }
             }
 
+            // 铺满窗口模式。
+            //
+            // 观察台原本排在 topbar、hero、toolbar、status 之后，而 .models-browser
+            // 自身就有 clamp(760px, 88vh, 980px) 的高度，所以页面总高必然超出视口：
+            // 想操作右侧控制台就得先滚页面，而且面板下半截还是被裁掉的。
+            //
+            // 打开后把观察台提成占满视口的固定层，舞台和控制台一起完整可见，页面
+            // 滚动条不再参与操作；只有控制台内部在内容超长时自己滚。
+            var focusMode = false;
+            function setFocusMode(next) {
+                focusMode = !!next;
+                document.body.classList.toggle("model-focus-mode", focusMode);
+                var card = host.closest(".model-3d-card");
+                if (card) {
+                    card.classList.toggle("is-focus", focusMode);
+                }
+                if (focusButton) {
+                    focusButton.setAttribute("aria-pressed", String(focusMode));
+                    focusButton.innerHTML = focusMode
+                        ? "<span aria-hidden='true'>✕</span> 退出铺满"
+                        : "<span aria-hidden='true'>⛶</span> 铺满窗口";
+                    focusButton.title = focusMode
+                        ? "退出铺满窗口（F 或 Esc）"
+                        : "铺满窗口，不用页面滚动条操作（F）";
+                }
+                // 容器尺寸变了，必须重算渲染缓冲，否则画面会被拉伸。
+                resize();
+            }
+            if (focusButton) {
+                focusButton.addEventListener("click", function () {
+                    setFocusMode(!focusMode);
+                });
+            }
+
             // 快捷键只在观察台可见、且焦点不在输入控件里时生效。
             function onViewerKeydown(event) {
                 if (disposed || !document.body.contains(host)) {
@@ -2535,6 +2570,17 @@
                     case "r":
                     case "R":
                         resetViewerState();
+                        break;
+                    case "f":
+                    case "F":
+                        setFocusMode(!focusMode);
+                        break;
+                    case "Escape":
+                        if (focusMode) {
+                            setFocusMode(false);
+                        } else {
+                            handled = false;
+                        }
                         break;
                     default:
                         handled = false;
@@ -2630,6 +2676,9 @@
                 disposed = true;
                 window.cancelAnimationFrame(animationFrame);
                 window.removeEventListener("keydown", onViewerKeydown);
+                // 铺满状态挂在 body 上，如果不清掉，切下一个模型时页面会卡在
+                // 一个没有观察台的铺满布局里，正文全部不可见。
+                document.body.classList.remove("model-focus-mode");
                 controls.dispose();
                 if (mixer) {
                     mixer.stopAllAction();
