@@ -11,6 +11,15 @@
     var PLAYER_MODEL_META = {};
     var MODEL_TITLES = [];
     var manifestState = { loaded: false, error: false, offline: false };
+    // Which facial ID each action asks for, and on which frame. Written by
+    // tools/build_facial_table.py out of the MabAnimEvents in the motion clips,
+    // so it is the game's own answer to "what face goes with this move".
+    // The manifest overrides this with a cache-busted path.
+    var FACIAL_ACTIONS_URL = "asset/models/facial/actions.json";
+    var facialActionState = { promise: null, fps: 30, actions: {} };
+    // Per-character expression tables, fetched on demand: one is ~1 KiB but
+    // there are 238 of them, and a visitor opens a handful.
+    var facialTableCache = {};
     // Chrome gives file:// pages an opaque origin, so neither fetch nor
     // XMLHttpRequest can read manifest.json or any .glb.gz next to the page.
     // 3D preview is impossible here no matter how the request is made.
@@ -548,11 +557,26 @@
             var enemyVisualParts = {};
             var enemyVariantParts = [];
             var faceSelects = {};
+            // The authoritative expression table for this character, or null for
+            // a model that has none (enemies, and the 34 player models with no
+            // CharacterListDB entry). Everything face-related checks this first
+            // and only falls back to the letter heuristics below when it is
+            // absent — those heuristics guess, this does not.
+            var facialTable = null;
+            var facialLayerNodes = {};
+            var facialStateIndex = -1;
+            var facialActions = null;
+            // Which event of the active clip is currently applied, so the frame
+            // it changes on is honoured without reapplying every frame.
+            var facialEventIndex = -1;
+            var facialOverrideSet = 0;
             // Letters index the head atlas layers, but their meaning is not
             // stable across characters and most bundles ship only a subset, so
             // every slot lists candidates in falling preference. Verified
             // against rendered contact sheets: eye_I is an iris-less oval and
             // mouth_F an untextured white block, so neither may be requested.
+            //
+            // Only reached for models with no authored table.
             var facePresets = {
                 normal: { eye: ["eye_A_1", "eye_A"], eyebrow: ["eyebrow_A"], mouth: ["mouth_A", "mouth_B"], overlay: [] },
                 smile: { eye: ["eye_A_1", "eye_A"], eyebrow: ["eyebrow_A"], mouth: ["mouth_L", "mouth_D", "mouth_B", "mouth_A"], overlay: [] },
@@ -562,6 +586,11 @@
                 surprised: { eye: ["eye_F", "eye_B_1", "eye_B", "eye_D_2", "eye_A_1", "eye_A"], eyebrow: ["eyebrow_D_2", "eyebrow_D", "eyebrow_A"], mouth: ["mouth_C", "mouth_C_2", "mouth_D"], overlay: [] },
                 abnormal: { eye: ["eye_G_2", "eye_G", "eye_E", "eye_K", "eye_A_1", "eye_A"], eyebrow: ["eyebrow_D", "eyebrow_C", "eyebrow_A"], mouth: ["mouth_G", "mouth_H", "mouth_B"], overlay: ["sen", "shade", "shadow"] }
             };
+            // Fallback only, for models with no authored table. The real
+            // action-to-face mapping is authored data and lives in
+            // asset/models/facial/actions.json; where that exists it wins, and
+            // it disagrees with these guesses (damage asks for the abnormal face
+            // rather than a sad one, kirarajump for the winning face).
             var actionFacePresets = {
                 idle: "normal",
                 room_idle_L: "normal",
@@ -938,7 +967,7 @@
                 // available until the next action selection.
                 faceFollowsAction = true;
                 if (modelObject) {
-                    selectFace(actionFacePresets[activeAction] || "normal", true);
+                    selectAutomaticFace();
                     applyEnemyVisualState(activeAction);
                 }
                 var selectedButton = null;
@@ -1088,8 +1117,295 @@
                 })[0]];
             }
 
+            // Index the head layers by the name the facial table addresses them
+            // by. One authored layer can arrive as several nodes (mirrored
+            // pieces, and the separate outline material), so each name keeps a
+            // list rather than a single node.
+            function indexFacialLayers() {
+                facialLayerNodes = {};
+                if (!facialTable || !modelObject) {
+                    return;
+                }
+                modelObject.traverse(function (child) {
+                    var name = resolveNodeName(child);
+                    if (name.slice(0, 4).toLowerCase() !== "l30_") {
+                        return;
+                    }
+                    var layer = name.slice(4);
+                    (facialLayerNodes[layer] = facialLayerNodes[layer] || []).push(child);
+                });
+            }
+
+            // Apply one row of the table: every layer it lists goes visible,
+            // every other switched layer goes hidden, and the layers the table
+            // records as never used in this direction stay hidden for good.
+            //
+            // Layers the table does not mention at all are the head base — hair,
+            // face, backhead — which is on for every expression and must not be
+            // touched.
+            function applyFacialState(index, automatic) {
+                if (!facialTable) {
+                    return false;
+                }
+                var state = facialTable.states[index];
+                if (!state) {
+                    return false;
+                }
+                var wanted = {};
+                state.forEach(function (layerIndex) {
+                    var layer = facialTable.layers[layerIndex];
+                    if (layer) {
+                        wanted[layer] = true;
+                    }
+                });
+                facialTable.layers.forEach(function (layer) {
+                    (facialLayerNodes[layer] || []).forEach(function (node) {
+                        node.visible = Boolean(wanted[layer]);
+                    });
+                });
+                (facialTable.hide || []).forEach(function (layer) {
+                    (facialLayerNodes[layer] || []).forEach(function (node) {
+                        node.visible = false;
+                    });
+                });
+                facialStateIndex = index;
+                faceFollowsAction = Boolean(automatic);
+                updateFacialControls(automatic);
+                return true;
+            }
+
+            // facialID -> state index, through the override sets the action
+            // events carry. CharacterFacialDB gives two characters a different
+            // face for the same event, and a zero set means no override.
+            function facialStateForId(facialId, overrideSet) {
+                if (!facialTable) {
+                    return -1;
+                }
+                if (overrideSet && facialTable.overrides) {
+                    var replaced = facialTable.overrides[String(overrideSet)];
+                    if (replaced !== undefined && replaced >= 0) {
+                        return replaced;
+                    }
+                }
+                var index = facialTable.ids[facialId];
+                return index === undefined ? -1 : index;
+            }
+
+            // Name a state from the evidence the builder recorded. The layer
+            // letters cannot be read for meaning — eye_C is a different eye on
+            // every character, and the direction blocks do not even agree with
+            // each other — so a state is named only when an action or a
+            // CharacterDefine constant asks for it, and by its number otherwise.
+            var FACIAL_TAG_LABELS = {
+                "default": "通常",
+                blink: "闭眼",
+                abnormal: "异常状态",
+                "action:win_st": "胜利",
+                "action:win_lp": "胜利",
+                "action:kirarajump": "跳跃",
+                "action:damage": "受击",
+                "action:dead": "倒下",
+                "action:abnormal": "异常状态",
+                "action:battle_in": "登场",
+                "action:battle_out": "退场",
+                "action:battle_run": "跑动",
+                "action:room_idle_R": "待机"
+            };
+
+            function facialStateLabel(index) {
+                var tags = (facialTable && facialTable.tags && facialTable.tags[index]) || [];
+                // A CharacterDefine tag says what the face *is*; an action tag
+                // only says who asks for it. One state is often both — the blink
+                // is also what win_st_2 shows partway through — and "闭眼"
+                // describes it where "胜利" would not.
+                var intrinsic = ["default", "blink", "abnormal"];
+                for (var i = 0; i < intrinsic.length; i++) {
+                    if (tags.indexOf(intrinsic[i]) >= 0) {
+                        return FACIAL_TAG_LABELS[intrinsic[i]];
+                    }
+                }
+                for (var j = 0; j < tags.length; j++) {
+                    if (FACIAL_TAG_LABELS[tags[j]]) {
+                        return FACIAL_TAG_LABELS[tags[j]];
+                    }
+                }
+                return "表情 " + (index + 1);
+            }
+
+            // Rebuild the preset strip out of the states this character actually
+            // has. The old strip offered seven fixed presets every character was
+            // assumed to own; the table says how many there really are (12 to 17)
+            // and the buttons now match one to one.
+            function mountFacialStates() {
+                var strip = document.querySelector(".model-face-strip");
+                if (!strip || !facialTable) {
+                    return;
+                }
+                strip.querySelectorAll("[data-face-preset], [data-facial-state]")
+                    .forEach(function (button) { button.remove(); });
+                faceButtons = [];
+                facialTable.states.forEach(function (_state, index) {
+                    var button = document.createElement("button");
+                    button.type = "button";
+                    button.dataset.facialState = String(index);
+                    button.setAttribute("aria-pressed", "false");
+                    button.textContent = facialStateLabel(index);
+                    button.title = "表情 " + (index + 1) + " / " + facialTable.states.length;
+                    button.addEventListener("click", function () {
+                        applyFacialState(index, false);
+                    });
+                    strip.appendChild(button);
+                });
+            }
+
+            function updateFacialControls(automatic) {
+                if (faceAutoButton) {
+                    faceAutoButton.classList.toggle("is-active", Boolean(automatic));
+                    faceAutoButton.setAttribute("aria-pressed", String(Boolean(automatic)));
+                }
+                var strip = document.querySelector(".model-face-strip");
+                if (!strip) {
+                    return;
+                }
+                strip.querySelectorAll("[data-facial-state]").forEach(function (button) {
+                    var isActive = !automatic
+                        && Number(button.dataset.facialState) === facialStateIndex;
+                    button.classList.toggle("is-active", isActive);
+                    button.setAttribute("aria-pressed", String(isActive));
+                });
+            }
+
+            // The face an action asks for on frame 0, used when the action is
+            // selected and whenever "跟随动作" is pressed.
+            function facialStateForAction(action) {
+                var events = facialActions && facialActions[action];
+                if (!events || !events.length) {
+                    return -1;
+                }
+                return facialStateForId(events[0][1], events[0][2]);
+            }
+
+            // The face the action wants *right now* — the event the timeline has
+            // reached, or the resting face for an action that authors none. This
+            // is what a blink has to hand back when it ends: win_st_0 is neutral
+            // until frame 7 and the winning face after it, so restoring the
+            // frame-0 face would undo the win.
+            function facialWantedState() {
+                var events = facialActions && facialActions[activeAction];
+                if (!events || !events.length) {
+                    return facialTable ? facialTable["default"] : -1;
+                }
+                var event = events[facialEventIndex >= 0 ? facialEventIndex : 0];
+                var state = facialStateForId(event[1], event[2]);
+                return state >= 0 ? state : (facialTable ? facialTable["default"] : -1);
+            }
+
+            // Blinking is the one thing the clips do not author: CharacterAnim
+            // runs it on a timer of its own, moving between the open and closed
+            // halves of FACIAL_ID_BLINK. It may only interrupt a resting face, so
+            // a move that asked for a specific expression keeps it.
+            function updateFacialBlink(time) {
+                if (!facialTable) {
+                    return;
+                }
+                // What the action wants, not what is on screen: the blink itself
+                // changes what is on screen, so testing that would make the face
+                // stop resting the instant it blinked and leave the eye shut.
+                var wanted = facialWantedState();
+                var canBlink = faceFollowsAction
+                    && wanted === facialTable["default"]
+                    && facialTable.blink >= 0
+                    && facialTable.blink !== facialTable["default"];
+                if (canBlink) {
+                    if (!blinkActive && time >= nextBlinkAt) {
+                        blinkActive = true;
+                        blinkUntil = time + 115;
+                        applyFacialState(facialTable.blink, true);
+                    } else if (blinkActive && time >= blinkUntil) {
+                        blinkActive = false;
+                        nextBlinkAt = time + 2800 + Math.random() * 2600;
+                        applyFacialState(wanted, true);
+                    }
+                } else {
+                    if (blinkActive) {
+                        // Interrupted mid-blink by a move that wants its own face;
+                        // hand the face back rather than leaving the eye shut.
+                        applyFacialState(wanted, true);
+                    }
+                    blinkActive = false;
+                    nextBlinkAt = time + 2800;
+                }
+                // The clip must not overwrite a closed eye, so it only advances
+                // between blinks.
+                if (!blinkActive) {
+                    updateFacialFromClip();
+                }
+            }
+
+            // Walk the active clip's own timeline. CharacterAnim changes the face
+            // partway through a move — damage asks for three faces across its
+            // first 14 frames — so the event frame has to be honoured rather than
+            // applying only the first one.
+            function updateFacialFromClip() {
+                if (!facialTable || !faceFollowsAction || !activeClipAction) {
+                    return;
+                }
+                var events = facialActions && facialActions[activeAction];
+                if (!events || !events.length) {
+                    return;
+                }
+                var clip = activeClipAction.getClip();
+                var duration = clip && clip.duration;
+                var time = activeClipAction.time;
+                if (duration) {
+                    // A looping clip restarts, and so does the event sequence.
+                    time = time % duration;
+                }
+                // Nudge by a thousandth of a frame before comparing. Accumulating
+                // 1/30 fourteen times and scaling back gives 13.9999996, so an
+                // event authored on frame 14 would otherwise land on 15.
+                var frame = time * (facialActionState.fps || 30) + 0.001;
+                var index = 0;
+                for (var i = 0; i < events.length; i++) {
+                    if (events[i][0] <= frame) {
+                        index = i;
+                    }
+                }
+                if (index === facialEventIndex) {
+                    return;
+                }
+                var state = facialStateForId(events[index][1], events[index][2]);
+                if (state >= 0) {
+                    facialEventIndex = index;
+                    facialOverrideSet = events[index][2];
+                    applyFacialState(state, true);
+                }
+            }
+
+            // Put the face back under the action's control. With a table that
+            // means the face the clip asks for on its own timeline; without one
+            // it falls back to the guessed presets.
+            function selectAutomaticFace() {
+                if (facialTable) {
+                    facialEventIndex = -1;
+                    faceFollowsAction = true;
+                    var state = facialStateForAction(activeAction);
+                    // An action with no authored facial event leaves the face
+                    // alone in game too, so the resting face is the right answer.
+                    applyFacialState(state >= 0 ? state : facialTable["default"], true);
+                    return;
+                }
+                selectFace(actionFacePresets[activeAction] || "normal", true);
+            }
+
             function selectFace(presetName, automatic) {
                 faceFollowsAction = Boolean(automatic);
+                if (facialTable) {
+                    // Reached only by the load-time call, before the table has
+                    // been consulted; the preset names have no meaning here.
+                    applyFacialState(facialTable["default"], Boolean(automatic));
+                    return;
+                }
                 var preset = facePresets[presetName] || facePresets.normal;
                 var selectedParts = {};
                 Object.keys(faceParts).forEach(function (kind) {
@@ -1585,6 +1901,50 @@
                     // model shows one eye/brow/mouth layer and no overlays.
                     if (new URLSearchParams(window.location.search).get("debug") === "1") {
                         window.__modelDebug = modelObject;
+                        // Enough of the facial engine to check it from outside:
+                        // which row is applied, which clip event drove it, and the
+                        // clip clock that decides when the next one lands.
+                        // requestAnimationFrame is throttled to nothing in a
+                        // hidden tab, so the render loop cannot be used to check
+                        // the event schedule. This advances the clip by an exact
+                        // delta and runs the same update the loop would.
+                        window.__facialStep = function (delta, now) {
+                            if (mixer) {
+                                mixer.update(delta);
+                            }
+                            // Same path the render loop takes, so the blink and the
+                            // clip events are exercised together rather than in
+                            // isolation. `now` stands in for the rAF timestamp.
+                            if (now === undefined) {
+                                updateFacialFromClip();
+                            } else {
+                                updateFacialBlink(now);
+                            }
+                            return {
+                                blinking: blinkActive,
+                                clipTime: activeClipAction && activeClipAction.time,
+                                frame: activeClipAction
+                                    && activeClipAction.time * (facialActionState.fps || 30),
+                                eventIndex: facialEventIndex,
+                                stateIndex: facialStateIndex,
+                                face: (facialTable && facialTable.states[facialStateIndex] || [])
+                                    .map(function (i) { return facialTable.layers[i]; })
+                            };
+                        };
+                        window.__facialDebug = function () {
+                            return {
+                                table: facialTable,
+                                stateIndex: facialStateIndex,
+                                eventIndex: facialEventIndex,
+                                followsAction: faceFollowsAction,
+                                action: activeAction,
+                                events: facialActions && facialActions[activeAction],
+                                fps: facialActionState.fps,
+                                clipTime: activeClipAction && activeClipAction.time,
+                                clipDuration: activeClipAction && activeClipAction.getClip().duration,
+                                loop: activeClipAction && activeClipAction.loop
+                            };
+                        };
                     }
                     mixer = new THREE.AnimationMixer(modelObject);
                     mountFaceControls();
@@ -1592,6 +1952,22 @@
                     // Apply the normal preset before the asynchronous class action
                     // download so shade/debuff layers never flash during loading.
                     selectFace("normal", true);
+                    // Then swap the guessed face for the authored one as soon as
+                    // the character's table arrives. Loading it here rather than
+                    // ahead of the GLB keeps the model itself first on the wire.
+                    if (preview.facial) {
+                        Promise.all([loadFacialTable(preview.facial), loadFacialActions()])
+                            .then(function (results) {
+                                if (disposed || !results[0] || !modelObject) {
+                                    return;
+                                }
+                                facialTable = results[0];
+                                facialActions = results[1].actions;
+                                indexFacialLayers();
+                                mountFacialStates();
+                                selectAutomaticFace();
+                            });
+                    }
                     hideEnemyDuplicateVariants();
                     applyEnemyVisualState("idle");
                     gltf.animations.forEach(function (clip) {
@@ -1639,7 +2015,7 @@
                             }
                         }
                         if (faceFollowsAction) {
-                            selectFace(actionFacePresets[activeAction] || "normal", true);
+                            selectAutomaticFace();
                         }
                         if (activeAction) {
                             selectAction(activeAction);
@@ -1720,7 +2096,7 @@
             });
             if (faceAutoButton) {
                 faceAutoButton.addEventListener("click", function () {
-                    selectFace(actionFacePresets[activeAction] || "normal", true);
+                    selectAutomaticFace();
                 });
             }
 
@@ -1734,7 +2110,9 @@
                     mixer.update(delta);
                 }
                 updateEnemyProceduralMotion(delta);
-                if (faceFollowsAction && activeAction === "idle" && activeFaceSelection) {
+                if (facialTable) {
+                    updateFacialBlink(time);
+                } else if (faceFollowsAction && activeAction === "idle" && activeFaceSelection) {
                     var blinkEye = resolveFacePartName("eye", "eye_C", true);
                     if (!blinkActive && time >= nextBlinkAt && blinkEye) {
                         var blinkSelection = Object.assign({}, activeFaceSelection, { eye: blinkEye });
@@ -1922,6 +2300,57 @@
         }
     }
 
+    // Both facial fetches retry like the manifest does: a stale CDN edge or a
+    // read racing a rebuild must not leave a model stuck with no face.
+    function fetchJsonWithRetry(url, attempt) {
+        attempt = attempt || 0;
+        return fetch(url, { cache: "default" }).then(function (response) {
+            if (!response.ok) {
+                throw new Error("HTTP " + response.status);
+            }
+            return response.json();
+        }).catch(function (error) {
+            if (attempt < 2) {
+                return new Promise(function (resolve) {
+                    window.setTimeout(resolve, 900 * (attempt + 1));
+                }).then(function () {
+                    return fetchJsonWithRetry(url, attempt + 1);
+                });
+            }
+            throw error;
+        });
+    }
+
+    // One file for every character, so it is fetched once per page.
+    function loadFacialActions() {
+        if (!facialActionState.promise) {
+            facialActionState.promise = fetchJsonWithRetry(FACIAL_ACTIONS_URL).then(function (data) {
+                facialActionState.fps = data.fps || 30;
+                facialActionState.actions = data.actions || {};
+                return facialActionState;
+            }).catch(function () {
+                // Without it the viewer still shows every expression; only the
+                // automatic action-driven face is lost, so fail quietly.
+                return facialActionState;
+            });
+        }
+        return facialActionState.promise;
+    }
+
+    function loadFacialTable(url) {
+        if (!url) {
+            return Promise.resolve(null);
+        }
+        if (!facialTableCache[url]) {
+            facialTableCache[url] = fetchJsonWithRetry(url).catch(function () {
+                // Let a later attempt try again rather than caching the failure.
+                delete facialTableCache[url];
+                return null;
+            });
+        }
+        return facialTableCache[url];
+    }
+
     // The manifest ships with the deployment and is rewritten whenever models
     // are rebuilt; a read racing that rewrite (or a stale CDN edge) must not
     // permanently disable every 3D preview, so retry a few times.
@@ -1947,6 +2376,9 @@
             Object.keys(manifest.classActions || {}).forEach(function (classId) {
                 CLASS_ACTION_PREVIEWS[classId] = manifest.classActions[classId];
             });
+            if (manifest.facialActions) {
+                FACIAL_ACTIONS_URL = manifest.facialActions;
+            }
             manifestState.loaded = true;
         }).catch(function () {
             if (attempt < 2) {
