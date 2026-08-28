@@ -35,8 +35,6 @@
         5: "gacha/ui/ElementIconSun.png"
     };
     var summonAudioFiles = {
-        standardVoice: "audio/gacha/claire-standard.mp3",
-        fiveStarVoice: "audio/gacha/claire-five-star.mp3",
         roomMorningVoice: "audio/gacha/claire-room-morning.mp3",
         roomDayVoice: "audio/gacha/claire-room-day.mp3",
         roomNightVoice: "audio/gacha/claire-room-night.mp3",
@@ -850,8 +848,10 @@
         return playSummonAudio("summonBgm", summonAudioFiles.gachaBgm, 0.28, true);
     }
 
-    function playResultVoice(isFiveStar) {
-        playSummonAudio("resultVoice", isFiveStar ? summonAudioFiles.fiveStarVoice : summonAudioFiles.standardVoice, 0.98, false);
+    function playResultVoice(hasRare4OrAbove) {
+        // 原版结算语音按手上是否出现 4★+ 播放两个固定 cue：Rare≥4 用
+        // voice_gacha_003，否则 voice_gacha_004（都在 Voice_Original_006）。
+        playSummonAudio("resultVoice", hasRare4OrAbove ? "audio/gacha/voice_gacha_003.mp3" : "audio/gacha/voice_gacha_004.mp3", 0.98, false);
     }
 
     function playTitleVoice(card) {
@@ -1401,7 +1401,7 @@
             updateRecordDisplay();
             renderResults(resultItems);
             playGachaBgm();
-            playResultVoice(results.some(function (card) { return card.rarity === 5; }));
+            playResultVoice(results.some(function (card) { return card.rarity >= 4; }));
             state.summonInProgress = false;
             setSummonButtonsDisabled(false);
             byId("resultsTitle").focus({ preventScroll: true });
