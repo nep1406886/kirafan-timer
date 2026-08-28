@@ -1,0 +1,18 @@
+{
+ "backgrounds": {
+  "library": {
+   "bundle": "adv/background/bg_adv_com_01_08.muast",
+   "size": [
+    1600,
+    1600
+   ]
+  },
+  "library-outside": {
+   "bundle": "adv/background/bg_adv_com_01_31.muast",
+   "size": [
+    1600,
+    1600
+   ]
+  }
+ }
+}

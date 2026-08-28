@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>とっておき 演出再現 / 必杀演出还原</title>
+<!--
+  End-to-end check for the とっておき pipeline:
+    tools/extract_uniqueskill_timeline.py  ->  asset/uniqueskill/timeline/<id>.json
+    tools/export_uniqueskill_scene.py      ->  asset/uniqueskill/scene/<id>.glb.gz
+    core/uniqueskill.js                    ->  frame-synced playback of both
+
+  This is the page that proves the two halves agree. The scene GLB carries the
+  authored MsbHandler state; the timeline carries every per-frame channel; the
+  player binds them by node/material name. If a name fails to bind it is
+  reported in the panel rather than silently ignored, because a silent miss
+  looks exactly like a channel the original never animated.
+-->
+<style>
+:root {
+    --bg: #10121a;
+    --panel: #171b26;
+    --line: #2a3040;
+    --text: #e8ebf2;
+    --dim: #8d96ab;
+    --accent: #ffb1cd;
+    --accent2: #8fd3ff;
+}
+* { box-sizing: border-box; }
+html, body {
+    margin: 0; height: 100%;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.5 "Segoe UI", "Hiragino Sans", "Noto Sans CJK SC", sans-serif;
+}
+#app { display: flex; height: 100%; }
+#stage { position: relative; flex: 1 1 auto; min-width: 0; background: #05070c; }
+#stage canvas { display: block; width: 100%; height: 100%; }
+#side {
+    flex: 0 0 320px; border-left: 1px solid var(--line);
+    background: var(--panel); overflow-y: auto; padding: 14px;
+}
+h1 { font-size: 15px; margin: 0 0 2px; letter-spacing: .04em; }
+h1 small { display: block; color: var(--dim); font-weight: 400; font-size: 11px; letter-spacing: 0; }
+.group { margin: 14px 0 0; }
+.group > label { display: block; color: var(--dim); font-size: 11px; margin-bottom: 4px; letter-spacing: .08em; text-transform: uppercase; }
+select, input[type=range] { width: 100%; }
+select {
+    background: #0d1017; color: var(--text);
+    border: 1px solid var(--line); border-radius: 4px; padding: 6px;
+}
+.row { display: flex; gap: 6px; margin-top: 8px; }
+button {
+    flex: 1; background: #212736; color: var(--text);
+    border: 1px solid var(--line); border-radius: 4px;
+    padding: 7px 4px; cursor: pointer; font-size: 13px;
+}
+button:hover { background: #2b3348; }
+button.on { background: var(--accent); color: #21151b; border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: default; }
+.meta { font-size: 12px; color: var(--dim); }
+.meta b { color: var(--text); font-weight: 600; }
+.meta div { display: flex; justify-content: space-between; gap: 8px; }
+#frameLabel { font-variant-numeric: tabular-nums; color: var(--accent2); }
+#log {
+    margin-top: 6px; height: 190px; overflow-y: auto;
+    font: 11px/1.45 "Cascadia Mono", Consolas, monospace;
+    background: #0b0e15; border: 1px solid var(--line); border-radius: 4px; padding: 6px;
+}
+#log div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#log .f { color: var(--dim); }
+#log .ev { color: var(--accent2); }
+#log .se { color: #ffd479; }
+#log .vo { color: var(--accent); }
+#log .pe { color: #9ee493; }
+#bind { font: 11px/1.5 "Cascadia Mono", Consolas, monospace; color: var(--dim); margin-top: 6px; }
+#bind .bad { color: #ff8b8b; }
+#bind .ok { color: #9ee493; }
+#status {
+    position: absolute; left: 0; right: 0; top: 0; padding: 10px 14px;
+    background: linear-gradient(#05070ce0, #05070c00); font-size: 12px; pointer-events: none;
+}
+#hint { position: absolute; left: 14px; bottom: 12px; font-size: 11px; color: #5d6478; pointer-events: none; }
+label.chk { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); margin-top: 6px; }
+</style>
+</head>
+<body>
+<div id="app">
+    <div id="stage">
+        <div id="status">読み込み中… / 加载中…</div>
+        <div id="hint">拖拽旋转 / 滚轮缩放 · 空格播放 · ←→ 单帧</div>
+    </div>
+    <div id="side">
+        <h1>とっておき 演出<small>必杀技演出还原 · 全 5★</small></h1>
+
+        <div class="group">
+            <label>キャラクター / 角色</label>
+            <select id="pick"></select>
+        </div>
+
+        <div class="group">
+            <label>再生 / 播放</label>
+            <input id="scrub" type="range" min="0" max="1" step="1" value="0">
+            <div class="meta"><div><span id="frameLabel">0 / 0</span><span id="timeLabel">0.00s</span></div></div>
+            <div class="row">
+                <button id="play">▶ 再生</button>
+                <button id="again">↺ 頭から</button>
+            </div>
+            <div class="row">
+                <button class="spd" data-s="0.25">0.25×</button>
+                <button class="spd on" data-s="1">1×</button>
+                <button class="spd" data-s="0.5">0.5×</button>
+            </div>
+            <label class="chk"><input id="freecam" type="checkbox"> 自由カメラ / 自由视角</label>
+            <label class="chk"><input id="showLoc" type="checkbox"> ロケーター表示 / 显示定位点</label>
+        </div>
+
+        <div class="group">
+            <label>データ / 数据</label>
+            <div class="meta" id="stats"></div>
+            <div id="bind"></div>
+        </div>
+
+        <div class="group">
+            <label>イベント / 事件 · SE · ボイス</label>
+            <div id="log"></div>
+        </div>
+    </div>
+</div>
+
+<script src="../asset/gacha/cards.js"></script>
+<script src="../asset/battle/uniqueskill.js"></script>
+<script type="module" src="./uniqueskill.js"></script>
+</body>
+</html>

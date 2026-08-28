@@ -1,0 +1,106 @@
+{
+ "characters": {
+  "archives": {
+   "expressions": [
+    "angry",
+    "default",
+    "happy",
+    "joy",
+    "shy",
+    "sorrow",
+    "surprise",
+    "unique1",
+    "unique2",
+    "unique3"
+   ],
+   "faceOffset": [
+    239,
+    58
+   ],
+   "size": [
+    538,
+    760
+   ]
+  },
+  "kirara": {
+   "expressions": [
+    "angry",
+    "default",
+    "happy",
+    "joy",
+    "shy",
+    "sorrow",
+    "surprise",
+    "unique1",
+    "unique2",
+    "unique3"
+   ],
+   "faceOffset": [
+    175,
+    70
+   ],
+   "size": [
+    391,
+    760
+   ]
+  },
+  "lamp": {
+   "expressions": [
+    "angry",
+    "default",
+    "happy",
+    "joy",
+    "shy",
+    "sorrow",
+    "surprise",
+    "unique1",
+    "unique2",
+    "unique3"
+   ],
+   "faceOffset": [
+    66,
+    45
+   ],
+   "size": [
+    272,
+    760
+   ]
+  },
+  "match": {
+   "expressions": [
+    "angry",
+    "default",
+    "happy",
+    "joy",
+    "shy",
+    "sorrow",
+    "surprise",
+    "unique1",
+    "unique2",
+    "unique3"
+   ],
+   "faceOffset": [
+    1,
+    0
+   ],
+   "size": [
+    115,
+    211
+   ]
+  }
+ },
+ "expressions": [
+  "default",
+  "angry",
+  "happy",
+  "joy",
+  "shy",
+  "sorrow",
+  "surprise",
+  "unique1",
+  "unique2",
+  "unique3"
+ ],
+ "root": "asset/story/standpic/",
+ "version": 1
+}

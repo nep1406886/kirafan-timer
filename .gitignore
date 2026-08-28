@@ -6,3 +6,8 @@ asset/models/class-actions/*/actions.glb.gz
 __face/
 __probe/
 __shots/
+
+# Downloaded .muast bundles and the intermediates the converters produce from
+# them. Every file here is re-fetchable from the asset CDN by the tool that
+# wrote it, so it is cache, not source -- and it is large.
+.cache/
