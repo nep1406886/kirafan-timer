@@ -508,6 +508,17 @@
 
     function classifyFacePart(partName) {
         var canonical = canonicalFacePartKey(partName);
+        // Glasses are worn, not blinked: "eyeglass" canonicalises to "eye_glass"
+        // and would otherwise be taken for an eye variant, so picking any eye in
+        // the expression panel would take the character's glasses off. The
+        // authored tables that switch them address them by name instead.
+        if (/^(?:eye_)?glass(?:es)?(?:_|$)/.test(canonical)) {
+            return "";
+        }
+        // An eyelid sits over the eye rather than replacing it.
+        if (/^eye_lid(?:_|$)/.test(canonical)) {
+            return "overlay";
+        }
         if (/^eyebrow(?:_|$)/.test(canonical)) {
             return "eyebrow";
         }

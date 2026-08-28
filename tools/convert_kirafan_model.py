@@ -194,12 +194,16 @@ class KirafanExporter:
         class_head_animation_bundle: Path | None = None,
         include_common_animations: bool = True,
         animation_only: bool = False,
+        extra_animation_bundles: dict[str, Path] | None = None,
     ) -> None:
         self.model_bundle = model_bundle
         self.environment = UnityPy.load(str(model_bundle))
         self.animation_dir = animation_dir
         self.class_animation_bundle = class_animation_bundle
         self.class_head_animation_bundle = class_head_animation_bundle
+        # {exported clip name: bundle holding its body and head clips}
+        self.extra_animation_bundles = extra_animation_bundles or {}
+        self.published_bundle_animations: list[str] = []
         self.include_common_animations = include_common_animations
         self.animation_only = animation_only
         self.builder = GlbBuilder()
@@ -433,19 +437,64 @@ class KirafanExporter:
     def include_head_renderer(name: str) -> bool:
         return name.startswith("L30_")
 
-    @staticmethod
-    def face_part(name: str) -> dict[str, str] | None:
-        if not name.startswith("L30_"):
+    # Switchable face layers, matched case-insensitively against the part name.
+    #
+    # The vocabulary is the game's, typos included: "eyebrrow" outnumbers the
+    # correct spelling, and "bule" appears for "blue".  Nine models (the newgame
+    # and sakura sets) capitalise theirs -- Eye_A, Eyebrrow_C, Eye_D2 -- so
+    # matching has to fold case or every one of their eye variants stays
+    # classified as head base and renders stacked on top of each other.
+    #
+    # A layer may also arrive with no variant suffix at all (bare "cheek",
+    # "sen", "eyebrrow"), or with a digit welded straight on ("Eye_A2" rather
+    # than "Eye_A_2"), so each pattern allows an optional suffix instead of
+    # anchoring on a trailing underscore.
+    #
+    # Anything absent here is head base -- hair, face, backhead, and the
+    # permanent decorations "hokuro" (a mole), "black", "backhair", "ribon" and
+    # "head_accessory", none of which any of the 238 authored facial tables ever
+    # switches.  Glasses are deliberately absent too: a handful of tables do
+    # switch them, but the models without a table must keep wearing them, so
+    # they stay visible by default rather than being hidden as an overlay.
+    # Order matters: "eyelid" and "eyebrrow" both start with "eye", so the
+    # narrower patterns have to be tried before the bare eye one.
+    FACE_PATTERNS = (
+        ("overlay", re.compile(r"^eyelid(?:[_-]?\w+)?$", re.I)),
+        # Three spellings in the wild: "eyebrow", "eyebrrow" (the commonest) and
+        # "eyeblow".  Miss one and its layers fall through to the bare eye rule
+        # below, where the brows then compete with the eyes as eye variants.
+        ("eyebrow", re.compile(r"^eye(?:br+|bl)ow(?:[_-]?\w+)?$", re.I)),
+        ("eye", re.compile(r"^eye(?:[_-]?\w+)?$", re.I)),
+        ("mouth", re.compile(r"^(?:mouth|kuchi)(?:[_-]?\w+)?$", re.I)),
+        # The emotion words are short and English, so an open \w+ suffix here
+        # would swallow any permanent mesh that merely starts with one and hide
+        # it for good.  Across the corpus their real suffixes are only ever a
+        # letter and/or a digit, optionally behind "_face", so spell that out.
+        # Keep this list in step with FACE_OVERLAY_PART in models.js: that one is
+        # the fallback used whenever these extras are missing, and if the two
+        # disagree a layer changes behaviour depending on which path ran.
+        ("overlay", re.compile(
+            r"^(?:cry|namida|tere|che+c?k|sen|shade|shadow|blue|bule|aozame|pale|"
+            r"red|black|angry|sad|shy|question|text)"
+            r"(?:_face)?(?:_?[A-Za-z](?:_?\d)?|_?\d)?$", re.I)),
+    )
+
+    @classmethod
+    def face_part(cls, name: str) -> dict[str, str] | None:
+        if not name[:4].lower() == "l30_":
             return None
         part = name[4:]
-        if part.startswith("eye_"):
-            return {"kind": "eye", "name": part}
-        if part.startswith(("eyebrow_", "eyebrrow_")):
-            return {"kind": "eyebrow", "name": part}
-        if part.startswith("mouth_"):
-            return {"kind": "mouth", "name": part}
-        if part == "cry" or part.startswith(("tere_", "cheek_", "cheeck_", "sen_", "shade", "shadow")):
-            return {"kind": "overlay", "name": part}
+        # Glasses read as "eye..." to the eye pattern, so take them out first.
+        # They are worn rather than switched: the few tables that do toggle them
+        # address them by name, and every model without a table has to keep
+        # them on, so they must not become a competing eye variant.
+        if re.match(r"^(?:eye)?glass(?:es)?(?:[_-]?\w+)?$", part, re.I):
+            return None
+        for kind, pattern in cls.FACE_PATTERNS:
+            if pattern.match(part):
+                # Keep the original spelling: the manual expression picker
+                # compares against it, and the labels should read like the asset.
+                return {"kind": kind, "name": part}
         return None
 
     def add_meshes(self, materials: dict[int, int]) -> None:
@@ -617,6 +666,52 @@ class KirafanExporter:
                 result[tree["m_Name"].split("@", 1)[-1]] = tree
         return result
 
+    @staticmethod
+    def load_clips_by_rig(bundle: Path) -> dict[str, dict[str, dict[str, Any]]]:
+        """{"body"|"head": {clip name: clip}} for a bundle holding both rigs.
+
+        The skill bundles ship the body and head clips together and name them
+        owner_body@skill / owner_head@skill, so keying on the part after the "@"
+        the way load_clips_from_path does makes the two collide and one silently
+        replaces the other.  The rig is in the part before it.
+        """
+        result: dict[str, dict[str, dict[str, Any]]] = {"body": {}, "head": {}}
+        environment = UnityPy.load(str(bundle))
+        for item in environment.objects:
+            if item.type.name != "AnimationClip":
+                continue
+            tree = item.read_typetree()
+            owner, _, action = tree["m_Name"].partition("@")
+            lowered = owner.lower()
+            if lowered.endswith("head"):
+                rig = "head"
+            elif lowered.endswith("body"):
+                rig = "body"
+            else:
+                # The unique-skill bundles also carry the effect scene's own clip
+                # (UniqueSkill@Take 001), which drives the particles and the
+                # camera rather than the character. It targets US_effect_set/*,
+                # nothing the model has, so it is skipped rather than exported.
+                continue
+            result[rig][action or tree["m_Name"]] = tree
+        return result
+
+    def add_bundle_animations(self, bundles: dict[str, Path]) -> list[str]:
+        """Publish one clip per {exported name: bundle}, body and head together."""
+        published = []
+        for name, bundle in bundles.items():
+            if not bundle.is_file():
+                continue
+            clips = self.load_clips_by_rig(bundle)
+            animation = {"name": name, "samplers": [], "channels": []}
+            for rig in ("body", "head"):
+                for clip in clips[rig].values():
+                    self.add_clip_channels(animation, clip, rig)
+            if animation["channels"]:
+                self.builder.document["animations"].append(animation)
+                published.append(name)
+        return published
+
     def add_class_animations(self) -> None:
         if not self.class_animation_bundle or not self.class_animation_bundle.is_file():
             return
@@ -674,6 +769,32 @@ class KirafanExporter:
                 keys = entry["curve"]["m_Curve"]
                 if node is None or not keys:
                     continue
+                # A curve that never moves needs one key, not one per frame. The
+                # skill clips are mostly this: 124 of owner_body@skill's 143
+                # translation curves hold still while the rig rotates, and each
+                # one was costing three CUBICSPLINE values per frame for nothing.
+                # Interpolation is irrelevant to a single key, so it is written as
+                # LINEAR rather than relying on how a reader treats a lone
+                # CUBICSPLINE key.
+                values = {tuple(key["value"].values()) for key in keys}
+                if len(values) == 1:
+                    convert = (curve_quat if width == 4
+                               else curve_vec3 if target_path == "translation"
+                               else lambda value: [float(value[k]) for k in ("x", "y", "z")])
+                    single = (convert(keys[0]["value"], True) if width == 4
+                              else convert(keys[0]["value"]))
+                    input_accessor = self.builder.add_accessor(
+                        np.asarray([keys[0]["time"]], dtype=np.float32),
+                        COMPONENT_FLOAT, "SCALAR", include_bounds=True)
+                    output_accessor = self.builder.add_accessor(
+                        np.asarray([single], dtype=np.float32), COMPONENT_FLOAT, f"VEC{width}")
+                    animation["samplers"].append({"input": input_accessor,
+                                                  "output": output_accessor,
+                                                  "interpolation": "LINEAR"})
+                    animation["channels"].append(
+                        {"sampler": len(animation["samplers"]) - 1,
+                         "target": {"node": node, "path": target_path}})
+                    continue
                 times = np.asarray([key["time"] for key in keys], dtype=np.float32)
                 output: list[list[float]] = []
                 for key in keys:
@@ -708,6 +829,7 @@ class KirafanExporter:
             if self.include_common_animations:
                 self.add_animations()
             self.add_class_animations()
+            self.published_bundle_animations = self.add_bundle_animations(self.extra_animation_bundles)
         else:
             materials = self.add_generic_materials()
             self.add_generic_meshes(materials)

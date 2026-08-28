@@ -186,11 +186,30 @@ def convert_one(job: dict[str, str]) -> dict[str, Any]:
     }
 
 
+# The per-model keys this builder produces, and therefore the only ones it may
+# overwrite when merging into an existing manifest.  Keep in step with the preview
+# dict built above.  "meshopt" and "compression" are conditional, so they are
+# listed here to be cleared when a rebuild stops emitting them -- publishing
+# without gltfpack has to drop a stale meshopt flag, or the viewer will expect a
+# compression extension the file no longer carries.
+OWNED_MODEL_KEYS = frozenset({
+    "file", "label", "animations", "expressions", "depthWrite",
+    "compression", "meshopt",
+})
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kind", choices=("all", "player", "enemy", "weapon", "shadow"), default="all")
     parser.add_argument("--name", help="Only convert the exact asset bundle name")
     parser.add_argument("--match", help="Only convert names containing this text")
+    parser.add_argument(
+        "--names-from",
+        type=Path,
+        help="Convert only the bundle names or model ids listed in this file, one per line. "
+             "Written by tools/reclassify_scan.py so a classifier change can be applied to "
+             "the models it actually affects instead of rebuilding the whole catalog.",
+    )
     parser.add_argument("--limit", type=int, default=0, help="Maximum number of selected models; zero means all")
     parser.add_argument(
         "--animated-enemies-only",
@@ -325,6 +344,22 @@ def main() -> None:
         selected = [entry for entry in selected if entry["name"] == args.name]
     if args.match:
         selected = [entry for entry in selected if args.match.lower() in entry["name"].lower()]
+    if args.names_from:
+        # Accept either the full bundle name ("model/player/model_pl_100001.muast")
+        # or just the stem, so the list can come from the manifest keys or from a
+        # directory listing without having to be reshaped first.
+        wanted = {
+            line.strip()
+            for line in args.names_from.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.startswith("#")
+        }
+        stems = {Path(name).stem for name in wanted}
+        selected = [entry for entry in selected
+                    if entry["name"] in wanted or Path(entry["name"]).stem in stems]
+        missing = stems - {Path(entry["name"]).stem for entry in selected}
+        if missing:
+            print(f"warning: {len(missing)} names in {args.names_from} matched no bundle, "
+                  f"e.g. {sorted(missing)[:3]}")
     selected.sort(key=lambda entry: entry["name"])
     if args.limit:
         selected = selected[: args.limit]
@@ -406,6 +441,26 @@ def main() -> None:
                     record(job, None, error)
 
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    # The manifest was read hours ago, before the conversion loop.  Other builders
+    # (skill actions, facial tables, the town catalog) write their own keys into the
+    # same file, so re-read it now and replace only what this run owns; otherwise a
+    # long rebuild silently reverts every key that changed while it was working.
+    if manifest_path.exists():
+        current = json.loads(manifest_path.read_text(encoding="utf-8"))
+        current["version"] = manifest["version"]
+        # Merge per entry rather than replacing "models" outright.  Other builders
+        # add their own keys inside each model -- build_facial_table.py writes the
+        # "facial" pointer onto 1221 of them -- and replacing the dict wholesale
+        # drops every one of those, leaving the viewer with no authored expression
+        # table to load.  Only the keys this builder produces may be overwritten.
+        merged_models = dict(current.get("models") or {})
+        for key, preview in manifest["models"].items():
+            existing = dict(merged_models.get(key) or {})
+            foreign = {name: value for name, value in existing.items()
+                       if name not in OWNED_MODEL_KEYS}
+            merged_models[key] = {**foreign, **preview}
+        current["models"] = merged_models
+        manifest = current
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Manifest: {manifest_path} · completed {len(completed)} · failed {len(failures)}")
     if failures:
