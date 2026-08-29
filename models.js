@@ -271,6 +271,43 @@
         return match ? PLAYER_MODEL_META[match[1]] || null : null;
     }
 
+    // 没自带动作的敌人，去同族的基础模型借。返回借得到的那份 preview，借不到
+    // 是 null。
+    //
+    // 604 个敌人里 465 个 animations:false，而有动作的那 139 个正好是每族的基础
+    // 号：model_en_10000 有 damage/abnormal/skill_0/skill_1/idle/dead 六段，
+    // 10001..10005 一段都没有。变体是基础模型的换色换件，动作包只挂在基础号上。
+    //
+    // 骨架是同一套，所以借得过来。10001 对 10000 逐节点比过：各 38 个节点，名字
+    // 不同的只有以模型号命名的三个网格容器节点（MeshRoot_Model_EN_1000x /
+    // Model_EN_1000x / Model_EN_1000x(Clone)），关节一个不差，基础包里 16 个被
+    // 动画寻址的节点在变体上 16 个全部解析成功。10103 对 10100 同样是 16/16。
+    // 借完实测：10001 六段 28..31 条轨道全部绑定，10103 是 25..43 条全部绑定。
+    //
+    // 借不到的话 mountActionControls 会摆七个程序生成的假动作顶上，而那七个只是
+    // 把整个模型按正弦上下平移加倾斜，一根骨头都不动 —— 那才是「很多动作有问题」
+    // 的来源。407 个敌人本来能放真动作。剩下 58 个（12600..12605、12700.. 这些）
+    // 本族没有基础号，只能继续用假的。
+    function enemyBaseActionSource(kind, preview) {
+        if (kind !== "enemy" || !preview || preview.animations) {
+            return null;
+        }
+        var match = /model_en_(\d+)/.exec(String(preview.file || ""));
+        if (!match) {
+            return null;
+        }
+        var id = match[1];
+        if (id.length <= 2) {
+            return null;
+        }
+        var baseId = id.slice(0, -2) + "00";
+        if (baseId === id) {
+            return null;
+        }
+        var base = MODEL_PREVIEWS["model/enemy/model_en_" + baseId + ".muast"];
+        return (base && base.animations) ? base : null;
+    }
+
     // Accepts anything that carries the id: a database entry name, or the
     // preview's file path (asset/models/model_pl_<id>/model.glb.gz).
     function rarityOf(source) {
@@ -496,8 +533,18 @@
         var preview = MODEL_PREVIEWS[model.name];
         var metadata = modelMetadata(model);
         var hasPlayerActions = Boolean(preview && (preview.animations || metadata || parts.kind === "enemy"));
+        // 三种情况要说三句话：自带动作的、跟同族基础模型借到动作的、以及本族没有
+        // 基础号只能用程序化预览的那 58 个。原先只分两种，于是 407 个借到了真动作
+        // 的敌人也被说成「程序化预览」。
+        var borrowedFrom = enemyBaseActionSource(parts.kind, preview);
+        var actionHint = "动作取自游戏原始 AnimationClip，表情按官方表情表跟随。";
+        if (parts.kind === "enemy" && preview && !preview.animations) {
+            actionHint = borrowedFrom
+                ? "该敌人包未附带 AnimationClip，以下动作借自同族基础模型（骨架相同）。"
+                : "该敌人包未附带 AnimationClip，且本族没有基础模型可借，以下为程序化预览。";
+        }
         var actionMarkup = hasPlayerActions
-            ? "<div class='model-control-panel' id='modelPanelAction' data-inspector-panel='action' role='tabpanel' aria-labelledby='modelTabAction'><div id='modelActionStrip' class='model-action-groups' role='group' aria-label='游戏动作'></div><p class='model-control-hint'>" + (parts.kind === "enemy" && !preview.animations ? "该敌人包未附带 AnimationClip，以下为程序化预览。" : "动作取自游戏原始 AnimationClip，表情按官方表情表跟随。") + "</p></div>"
+            ? "<div class='model-control-panel' id='modelPanelAction' data-inspector-panel='action' role='tabpanel' aria-labelledby='modelTabAction'><div id='modelActionStrip' class='model-action-groups' role='group' aria-label='游戏动作'></div><p class='model-control-hint'>" + actionHint + "</p></div>"
             : "";
         // 武器这类没有表情层的模型不该出现「表情」页，那一页会是空的。
         var faceMarkup = preview && preview.expressions
@@ -3071,6 +3118,14 @@
                 return loadRetargetedClips(loader, source, "职业动作");
             }
 
+            function loadEnemyBaseClips(loader) {
+                return loadRetargetedClips(
+                    loader,
+                    enemyBaseActionSource(modelKind, preview),
+                    "同族动作"
+                );
+            }
+
             // とっておき and the character's own battle skill, from the GLB
             // tools/build_skill_action_catalog.py publishes for this model id.
             // Fetched only when asked for: each is ~180 KiB, far more than the
@@ -3985,7 +4040,14 @@
                     hideModelLoadNote();
                     modelObject.updateMatrixWorld(true);
                     fitModelView(true);
-                    loadClassActionClips(loader).then(function (classClips) {
+                    // 玩家走职业动作，没自带动作的敌人走同族基础模型。两条路互斥
+                    // （敌人没有 metadata.class，玩家不进 enemyBaseActionSource），
+                    // 放在一起是为了后面的合并只写一遍。
+                    Promise.all([
+                        loadClassActionClips(loader),
+                        loadEnemyBaseClips(loader)
+                    ]).then(function (borrowed) {
+                        var classClips = borrowed[0].concat(borrowed[1]);
                         var clips = [];
                         clipByName = {};
                         classClips.concat(gltf.animations).forEach(function (clip) {
