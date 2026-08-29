@@ -86,6 +86,73 @@
         });
         return viewerModules;
     }
+    // とっておき 演出。core/uniqueskill.js 已经把游戏自己的调度实现完了
+    // （Unity TRS 曲线 + Meige 的 meshVisibility/meshColor/UV/相机通道 +
+    // 帧事件），原本只有 game/uniqueskill.html 那个诊断页在用。观察台这边
+    // 之前只把角色的大招动作重定向到模型上播，背景、云、光、以及那台被
+    // 动画驱动的正交相机全都没有 —— 所以看起来就是个人在空场里挥手。
+    //
+    // 单独按需 import：177 个演出场景平均 24 KiB，加上模块本身，只有真的
+    // 点了「演出」才值得下载。
+    var cinematicModule = null;
+    function loadCinematicModule() {
+        if (!cinematicModule) {
+            cinematicModule = import("./core/uniqueskill.js").catch(function (error) {
+                cinematicModule = null;
+                throw error;
+            });
+        }
+        return cinematicModule;
+    }
+
+    // 贴图 alpha 斜坡的颜色修复。core/texture-fringe.js 里记着量出来的
+    // 数字：model_en_7000 的 512×512 主图有 55.6% 的纹素 alpha 不满，
+    // 而它们的亮度随 alpha 一路掉到 18 —— cutoff 0.01 把这一截全留下并
+    // 按不透明画出来，放大三倍之后就是头发和嘴周围那圈黑边。
+    //
+    // models.js 是普通脚本不是模块，所以按需 import；拿不到就照旧渲染，
+    // 只是黑边还在，不至于整个观察台打不开。
+    var fringeModule = null;
+    function loadFringeModule() {
+        if (!fringeModule) {
+            fringeModule = import("./core/texture-fringe.js").catch(function (error) {
+                fringeModule = null;
+                throw error;
+            });
+        }
+        return fringeModule;
+    }
+    var fringeHelpers = null;
+    // ?nofringe=1 关掉修复，用来做前后对照量黑边 —— 不留这个开关就只能靠
+    // 改代码再刷新，两次的相机和姿势对不齐，量出来的差值没有意义。
+    var FRINGE_QUERY = new URLSearchParams(window.location.search);
+    var FRINGE_DISABLED = FRINGE_QUERY.get("nofringe") === "1";
+    // ?fringefloor=0.5 改判定线，用来扫参数。斜坡里 alpha 高的那一段可能是
+    // 画师真画的柔和过渡，不是合成留下的痕迹，判定线定在哪里得量出来。
+    var FRINGE_FLOOR = Number(FRINGE_QUERY.get("fringefloor"));
+    var FRINGE_OPTIONS = {};
+    if (Number.isFinite(FRINGE_FLOOR) && FRINGE_FLOOR > 0) {
+        FRINGE_OPTIONS.alphaFloor = FRINGE_FLOOR;
+    }
+    // ?fringemode=solidify 用无条件填充，默认只允许提亮。哪个对得看量出来的
+    // 结果，所以两个都留着。
+    if (FRINGE_QUERY.get("fringemode")) {
+        FRINGE_OPTIONS.mode = FRINGE_QUERY.get("fringemode");
+    }
+    var FRINGE_PASSES = Number(FRINGE_QUERY.get("fringepasses"));
+    if (Number.isFinite(FRINGE_PASSES) && FRINGE_PASSES > 0) {
+        FRINGE_OPTIONS.passes = FRINGE_PASSES;
+    }
+    // 预热：模型解析完就要用，等到那时候再 await 一个网络请求会让第一帧
+    // 先用没修的贴图画出来再跳变。
+    if (!FRINGE_DISABLED) {
+        loadFringeModule().then(function (module) {
+            fringeHelpers = module;
+        }).catch(function () {
+            fringeHelpers = null;
+        });
+    }
+
     var state = {
         allModels: [],
         filteredModels: [],
@@ -430,8 +497,32 @@
         var weaponMarkup = metadata
             ? "<section class='model-control-section' id='modelWeaponInterface' data-default-mode='" + (dedicatedAvailable ? "dedicated" : "default") + "'><div class='model-control-heading'><strong>装备</strong><small id='modelWeaponStatus'>" + (dedicatedAvailable ? escapeHtml(dedicatedWeapon.name) : "职业默认武器") + "</small></div><div class='model-weapon-options' role='group' aria-label='武器显示'><button type='button' data-weapon-mode='none' aria-pressed='false'>不持有</button><button type='button' data-weapon-mode='default' aria-pressed='" + String(!dedicatedAvailable) + "' class='" + (dedicatedAvailable ? "" : "is-active") + "'>职业武器</button>" + (dedicatedAvailable ? "<button type='button' data-weapon-mode='dedicated' class='is-active' aria-pressed='true'>专用武器</button>" : "") + "</div></section>"
             : "";
+        // 构图改成直接在画布上操作 + 一排定点视角。
+        //
+        // 原本这里是「模型大小」和「上下位置」两根滑块,它们动的是模型自身的
+        // scale 和 position,而不是镜头;加上当时方位角锁在 ±15°,画布上拖不
+        // 动,于是想换个角度只能来拉滑块 —— 而滑块又转不了圈,鞋底和背面根本
+        // 到不了。现在镜头限制已经放开,拖拽/滚轮/右键就是完整的三轴操作,滑
+        // 块没有存在意义了。
+        //
+        // 保留一排按钮是因为「回到正面」「看鞋底」这种需求用拖拽反而慢,而且
+        // 按钮可用键盘直达。
         var adjustMarkup = preview
-            ? "<section class='model-control-section model-view-controls'><div class='model-control-heading'><strong>构图</strong><small>画布视图</small></div><div class='model-adjust-drawer' id='modelAdjustDrawer'><label><span>模型大小</span><input id='modelScaleRange' type='range' min='60' max='160' value='100' step='1'><output id='modelScaleValue'>100%</output></label><label><span>上下位置</span><input id='modelVerticalRange' type='range' min='-50' max='50' value='0' step='1'><output id='modelVerticalValue'>0</output></label></div></section>"
+            ? "<section class='model-control-section model-view-controls'><div class='model-control-heading'><strong>视角</strong><small>画布可直接拖拽</small></div>"
+                + "<div class='model-view-presets' role='group' aria-label='定点视角'>"
+                + "<button type='button' data-view-preset='front' class='is-active' aria-pressed='true'>正面</button>"
+                + "<button type='button' data-view-preset='left' aria-pressed='false'>左侧</button>"
+                + "<button type='button' data-view-preset='right' aria-pressed='false'>右侧</button>"
+                + "<button type='button' data-view-preset='back' aria-pressed='false'>背面</button>"
+                + "<button type='button' data-view-preset='top' aria-pressed='false'>俯视</button>"
+                + "<button type='button' data-view-preset='bottom' aria-pressed='false'>仰视</button>"
+                + "</div>"
+                + "<div class='model-view-zooms' role='group' aria-label='取景'>"
+                + "<button type='button' data-view-zoom='full' class='is-active' aria-pressed='true'>全身</button>"
+                + "<button type='button' data-view-zoom='face' aria-pressed='false'>脸部</button>"
+                + "<button type='button' data-view-zoom='feet' aria-pressed='false'>足部</button>"
+                + "</div>"
+                + "<p class='model-control-hint'>左键拖拽转动 · 滚轮缩放 · 右键或 Shift 拖拽平移 · 双击画布复位</p></section>"
             : "";
         // 装备与构图都是「设置一次就不再动」的控制，合成一个标签页，
         // 让动作和表情各自独占一屏，不必再滚动侧栏。
@@ -455,6 +546,13 @@
                     + " aria-selected='" + String(index === 0) + "' class='" + (index === 0 ? "is-active" : "") + "'>" + escapeHtml(tab.label) + "</button>";
             }).join("") + "</div>"
             : "";
+        // 重置 / 铺满 原本在观察台自己那条 62px 的工具条上。那条工具条整个去掉了
+        // （标题和页签重复，而高度是从画布里扣的），按钮并到播放条右端。
+        var viewerActionsMarkup = "<div class='model-3d-actions'>"
+            + "<span class='model-shortcut-hint'>拖拽转动 · 滚轮缩放 · 1-6 视角 · 空格播放 · R 重置 · F 铺满 · [ ] 收放列表</span>"
+            + "<button id='modelViewReset' type='button' title='恢复模型位置和镜头（R）'><span aria-hidden='true'>↺</span> 重置</button>"
+            + "<button id='modelFocusToggle' type='button' aria-pressed='false' title='工作台铺满窗口，列表仍在左侧（F）'><span aria-hidden='true'>⛶</span> 铺满窗口</button>"
+            + "</div>";
         // 播放条只在真有动画时出现：敌人程序化预览没有时间轴可拖。
         var transportMarkup = hasPlayerActions
             ? "<div class='model-transport' id='modelTransport'>"
@@ -467,10 +565,17 @@
                 + "<button type='button' data-playback-rate='1' class='is-active' aria-pressed='true'>1×</button>"
                 + "</div>"
                 + "<button id='modelLoopToggle' type='button' class='model-transport-loop is-active' aria-pressed='true' title='循环播放（L）'><span aria-hidden='true'>↻</span></button>"
+                + viewerActionsMarkup
                 + "</div>"
-            : "";
+            : "<div class='model-transport model-transport-bare'>" + viewerActionsMarkup + "</div>";
+        // 观察台自己那条工具条取消了。
+        //
+        // 它原本占 62px，内容是「LIVE WEBGL / 模型观察台 / 素材名」加两个按钮 ——
+        // 标题和上面的页签重复，素材名和详情头重复，而这 62px 是直接从画布高度里
+        // 扣的。实测 950px 窗口下画布只剩 399px，舞台上方的各种条加起来吃掉 498px。
+        // 现在按钮并进播放条右端，标题交给页签。
         var previewMarkup = preview
-            ? "<section class='model-3d-card' aria-label='游戏模型预览'><div class='model-3d-toolbar'><div><span class='model-live-badge'><i aria-hidden='true'></i>LIVE WEBGL</span><strong>模型观察台</strong><small>" + escapeHtml(preview.label) + "</small></div><div class='model-3d-actions'><span class='model-shortcut-hint'>空格播放 · ←→ 逐帧 · R 重置 · F 全屏</span><button id='modelFocusToggle' type='button' aria-pressed='false' title='铺满窗口，不用页面滚动条操作（F）'><span aria-hidden='true'>⛶</span> 铺满窗口</button><button id='modelViewReset' type='button' title='恢复模型位置和镜头（R）'><span aria-hidden='true'>↺</span> 重置</button></div></div><div class='model-viewer-layout'><div class='model-viewer-stage'><div id='model3dCanvas' class='model-3d-canvas'><div class='model-3d-loading'><span class='model-spinner' aria-hidden='true'></span><p>正在读取模型数据……</p></div></div>" + transportMarkup + "</div><aside class='model-viewer-inspector' aria-label='模型控制台'>" + tabsMarkup + "<div class='model-inspector-body'>" + actionMarkup + faceMarkup + setupMarkup + "</div></aside></div></section>"
+            ? "<section class='model-3d-card' aria-label='游戏模型预览'><div class='model-viewer-layout'><div class='model-viewer-stage'><div id='model3dCanvas' class='model-3d-canvas'><div class='model-3d-loading'><span class='model-spinner' aria-hidden='true'></span><p>正在读取模型数据……</p></div></div>" + transportMarkup + "</div><aside class='model-viewer-inspector' aria-label='模型控制台'>" + tabsMarkup + "<div class='model-inspector-body'>" + actionMarkup + faceMarkup + setupMarkup + "</div></aside></div></section>"
             : unavailableMarkup;
         var identityMarkup = metadata
             ? "<span>作品 <strong>" + escapeHtml(bilingualLabel(metadata.titleZh, metadata.title)) + "</strong></span><span>角色 <strong>" + escapeHtml(bilingualLabel(metadata.characterZh, metadata.character)) + "</strong></span>"
@@ -482,10 +587,63 @@
             ? "<span>稀有度 <strong class='model-rarity'>" + escapeHtml(rarityStars(rarityEntry)) + "</strong></span>"
                 + "<span>とっておき <strong>" + (rarityEntry.totteoki ? "有" : "无（★3 无大招）") + "</strong></span>"
             : "";
-        elements.detail.innerHTML = "<header class='model-detail-header'><div><span class='models-eyebrow'>" + escapeHtml(parts.kind.toUpperCase()) + " MODEL</span><h2 id='modelDetailTitle'>" + escapeHtml(parts.file.replace(/\.muast$/i, "")) + "</h2><p class='model-detail-path'>" + escapeHtml(model.name) + "</p></div><div class='model-detail-actions'><a href='" + detailUrl(model) + "' target='_blank' rel='noopener noreferrer'>官方详情 ↗</a><a href='" + rawAssetUrl(model) + "' target='_blank' rel='noopener noreferrer'>原始包 ↗</a></div></header>" +
-            "<div class='model-meta'>" + identityMarkup + rarityMarkup + "<span>包大小 <strong>" + formatSize(model.size) + "</strong></span><span>可视纹理 <strong>" + spriteCount + " 个</strong></span><span>Bucket <strong>" + escapeHtml(bucketFor(model)) + "</strong></span></div>" +
-            previewMarkup +
-            "<div class='model-texture-heading'><div><span class='models-eyebrow'>SOURCE TEXTURES</span><h3>模型纹理图集</h3></div><p>用于核对模型使用的原始贴图，不等同于模型本身。</p></div><div class='model-texture-grid' id='modelTextureGrid'></div>";
+        // 观察台和纹理图集分成两个视图页签。
+        //
+        // 它们原本上下排在同一个滚动容器里：想看纹理要滚详情区，而右边控制台又在
+        // 同一片区域里自己滚，再加上页面本身的滚动条，三层嵌在一起 —— 反馈里
+        // 「竖着的滚动条很容易和浏览器本身的滚动条冲突」就是这么来的。分开之后
+        // 舞台那一页完全不滚（高度由 grid 给满），只有纹理页是滚动区。
+        var assetsMarkup = "<div class='model-detail-view' data-detail-panel='assets' role='tabpanel' aria-labelledby='modelViewTabAssets'"
+            + (preview ? " hidden" : "") + ">"
+            + (preview ? "" : unavailableMarkup)
+            + "<div class='model-meta'>"
+            + "<span>路径 <strong class='model-detail-path'>" + escapeHtml(model.name) + "</strong></span>"
+            + identityMarkup + rarityMarkup
+            + "<span>包大小 <strong>" + formatSize(model.size) + "</strong></span>"
+            + "<span>可视纹理 <strong>" + spriteCount + " 个</strong></span>"
+            + "<span>Bucket <strong>" + escapeHtml(bucketFor(model)) + "</strong></span></div>"
+            + "<div class='model-texture-heading'><div><span class='models-eyebrow'>SOURCE TEXTURES</span><h3>模型纹理图集</h3></div><p>用于核对模型使用的原始贴图，不等同于模型本身。</p></div>"
+            + "<div class='model-texture-grid' id='modelTextureGrid'></div></div>";
+        var stageMarkup = preview
+            ? "<div class='model-detail-view' data-detail-panel='stage' role='tabpanel' aria-labelledby='modelViewTabStage'>" + previewMarkup + "</div>"
+            : "";
+        var viewTabs = [];
+        if (stageMarkup) {
+            viewTabs.push({ key: "stage", label: "模型观察台" });
+        }
+        viewTabs.push({ key: "assets", label: "纹理图集 " + spriteCount });
+        var viewTabsMarkup = viewTabs.length > 1
+            ? "<div class='model-detail-views' role='tablist' aria-label='详情视图'>" + viewTabs.map(function (tab, index) {
+                var cap = tab.key.charAt(0).toUpperCase() + tab.key.slice(1);
+                return "<button type='button' role='tab' id='modelViewTab" + cap + "' data-detail-tab='" + tab.key + "'"
+                    + " aria-controls='modelViewPanel" + cap + "' aria-selected='" + String(index === 0) + "'"
+                    + " class='" + (index === 0 ? "is-active" : "") + "'>" + escapeHtml(tab.label) + "</button>";
+            }).join("") + "</div>"
+            : "";
+        // 标题、身份信息、视图页签合成一条。
+        //
+        // 原来是三块竖着排：detail-header 103px + model-meta 62px（含外边距）+
+        // detail-views 37px = 202px，全从画布高度里扣。名字、作品、稀有度这些是
+        // 一行字的量，不需要各占一块。完整的元数据（包大小、Bucket、纹理数）挪进
+        // 纹理页 —— 那一页本来就是「核对素材」用的。
+        var titleText = parts.file.replace(/\.muast$/i, "");
+        var headBits = [];
+        if (metadata) {
+            headBits.push("<span>" + escapeHtml(bilingualLabel(metadata.characterZh, metadata.character)) + "</span>");
+            headBits.push("<span>" + escapeHtml(bilingualLabel(metadata.titleZh, metadata.title)) + "</span>");
+        }
+        if (rarityEntry) {
+            headBits.push("<span class='model-rarity'>" + escapeHtml(rarityStars(rarityEntry)) + "</span>");
+        }
+        elements.detail.innerHTML = "<header class='model-detail-header'>"
+            + "<div class='model-detail-ident'>"
+            + "<h2 id='modelDetailTitle'>" + escapeHtml(titleText) + "</h2>"
+            + (headBits.length ? "<div class='model-detail-tags'>" + headBits.join("") + "</div>" : "")
+            + "</div>"
+            + viewTabsMarkup
+            + "<div class='model-detail-actions'><a href='" + detailUrl(model) + "' target='_blank' rel='noopener noreferrer'>官方详情 ↗</a><a href='" + rawAssetUrl(model) + "' target='_blank' rel='noopener noreferrer'>原始包 ↗</a></div>"
+            + "</header>"
+            + stageMarkup + assetsMarkup;
         var grid = document.getElementById("modelTextureGrid");
         spriteNames.forEach(function (spriteName, index) {
             var card = document.createElement("figure");
@@ -494,10 +652,41 @@
             grid.appendChild(card);
         });
         mountInspectorTabs();
+        mountDetailViewTabs();
         if (preview) {
             mount3DModel(preview, metadata, parts.kind);
         }
     }
+
+    // 详情区的两个视图页签（观察台 / 纹理图集）。
+    // 切回观察台时要通知渲染器重算尺寸：hidden 期间容器的 clientWidth 是 0，
+    // 那段时间里如果发生过 resize，缓冲区就还停在 0 上。
+    function mountDetailViewTabs() {
+        var tabs = Array.prototype.slice.call(document.querySelectorAll("[data-detail-tab]"));
+        var panels = Array.prototype.slice.call(document.querySelectorAll("[data-detail-panel]"));
+        if (!tabs.length || !panels.length) {
+            return;
+        }
+        tabs.forEach(function (tab) {
+            tab.addEventListener("click", function () {
+                var key = tab.dataset.detailTab;
+                tabs.forEach(function (other) {
+                    var on = other === tab;
+                    other.classList.toggle("is-active", on);
+                    other.setAttribute("aria-selected", String(on));
+                });
+                panels.forEach(function (panel) {
+                    panel.hidden = panel.dataset.detailPanel !== key;
+                });
+                if (key === "stage" && typeof viewerResizeHook === "function") {
+                    viewerResizeHook();
+                }
+            });
+        });
+    }
+
+    // mount3DModel 内部的 resize() 需要被外面（页签切换、全屏）叫到。
+    var viewerResizeHook = null;
 
     function mountInspectorTabs() {
         var tabs = Array.prototype.slice.call(document.querySelectorAll("[data-inspector-tab]"));
@@ -619,17 +808,39 @@
         return 0;
     }
 
+    // 抗锯齿这条路已经量到底了,结论是现状(alpha-to-coverage)就是对的,
+    // 不要再改。留下这段是因为三个看起来很有道理的方案都被数据否掉了:
+    //
+    // 1. 提高 pixelRatio。1/2/3/4/6 倍下锯齿指标 0.2307/0.2345/0.2294/
+    //    0.2308/0.2290,完全不动。
+    // 2. 在 shader 里按 fwidth 把 alpha 斜坡重新锐化成一个像素宽。图集
+    //    alpha 不是距离场:内部还有画出来的半透明(叠发、缎带、锁链),那里
+    //    fwidth 约等于 0,除下去直接夹到 1.0,前面那层变全不透明把后面整个
+    //    盖掉,锁链描线断成一节一节。按梯度设闸门之后轮廓也只是换了个贴着
+    //    纹素方格走的方式,依旧是台阶。那条双线性斜坡本身就是这些图集自带
+    //    的抗锯齿,轮廓的亚像素位置全写在它的灰阶里,动它就是在删信息。
+    // 3. 换成真正的 alpha 混合(8 bit,而 4 采样的 coverage 只有 5 档)。
+    //    这个一开始量出来是赢的,但那是把混合的结果拿混合自己的超采样版当
+    //    基准 —— 循环论证。改成交叉比对(两种模式各出一份 4 倍超采样基准)
+    //    之后:
+    //      model_en_7000    1x 覆盖率 vs coverage@4x  0.2652
+    //                       1x 混合   vs coverage@4x  0.3211
+    //      model_pl_140007  两者打平(0.3173 / 0.3170)
+    //    而且两份基准本身有 5% 的像素不一致 —— 混合把材质挪进透明队列,画
+    //    的就不是同一张图了(140007 的袖子从深红变成半透明)。游戏自己写的
+    //    是 _Mode=0 / _SrcBlend=One / _DstBlend=Zero / _ZWrite=1,不透明才
+    //    是原意。
+    //
+    // 真正的上限是纹理:一张 512x512 摊到三个物理像素上(实测 2.75~3.40,
+    // 中位 3.02)。要更细只能从源头拿到更多像素,渲染这一侧没有余量了。
+
     function mount3DModel(preview, metadata, modelKind) {
         var host = document.getElementById("model3dCanvas");
         var motionButton = document.getElementById("modelMotionToggle");
         var resetButton = document.getElementById("modelViewReset");
         var focusButton = document.getElementById("modelFocusToggle");
-        var adjustButton = document.getElementById("modelAdjustToggle");
-        var adjustDrawer = document.getElementById("modelAdjustDrawer");
-        var scaleRange = document.getElementById("modelScaleRange");
-        var scaleValue = document.getElementById("modelScaleValue");
-        var verticalRange = document.getElementById("modelVerticalRange");
-        var verticalValue = document.getElementById("modelVerticalValue");
+        var viewPresetButtons = Array.prototype.slice.call(document.querySelectorAll("[data-view-preset]"));
+        var viewZoomButtons = Array.prototype.slice.call(document.querySelectorAll("[data-view-zoom]"));
         var actionStrip = document.getElementById("modelActionStrip");
         var timeline = document.getElementById("modelTimeline");
         var timeReadout = document.getElementById("modelTimeReadout");
@@ -675,6 +886,18 @@
             // 大招 GLB 只下载一次，无论用户点哪一段。
             var skillClipsRequested = false;
             var skillLoader = null;
+            // とっておき 演出（背景 + 特效 + 过场相机）。
+            //
+            // cinematic 为 null 表示当前在普通观察模式：镜头是那台透视相机，
+            // OrbitControls 可用。进入演出后换成时间轴里那台被 camOrthoSize
+            // 驱动的正交相机，控件停掉 —— 过场的构图是作品的一部分,让用户
+            // 中途拖镜头只会看到穿帮。
+            var cinematic = null;
+            var cinematicRequest = 0;
+            var cinematicAvailable = false;
+            var cinematicWanted = true;
+            var cinematicButton = null;
+            var cinematicStatus = null;
             // 拖时间轴时不能让渲染循环把滑块拽回去。
             var scrubbing = false;
             var faceFollowsAction = true;
@@ -690,6 +913,12 @@
             var weaponRequest = 0;
             var homeView = null;
             var modelHeight = 1;
+            // 取景按钮要按身体比例定注视点,所以整个包围盒都得留着,不只是高度。
+            var modelBounds = null;
+            var viewTween = null;
+            // 重置要能把武器恢复成默认那件,而 attachWeaponMode 需要 loader,
+            // 它原本只活在 load 回调里。
+            var activeLoader = null;
             var baseRotationZ = 0;
             var enemyMotionTime = 0;
             var enemyMotionBasePosition = null;
@@ -698,6 +927,7 @@
             var faceParts = { eye: {}, eyebrow: {}, mouth: {}, overlay: {} };
             var enemyVisualParts = {};
             var enemyVariantParts = [];
+            var facingVariantsHidden = 0;
             var duplicateMeshesHidden = 0;
             // {node name: [Object3D, ...]} for every node the visibility table
             // governs on this model, and the track set for the clip now playing.
@@ -818,14 +1048,129 @@
                     enemyMotionBaseRotation = modelObject.rotation.clone();
                     enemyMotionTime = 0;
                 }
-                if (scaleRange) {
-                    scaleRange.value = "100";
-                    scaleValue.textContent = "100%";
+            }
+
+            // 三处按钮组(视角、取景、以后的武器)选中态的写法一样,收成一处,
+            // 顺便保证 aria-pressed 不会漏掉 —— 之前重置只改了 class。
+            function markActive(buttons, datasetKey, value) {
+                buttons.forEach(function (button) {
+                    var isActive = button.dataset[datasetKey] === value;
+                    button.classList.toggle("is-active", isActive);
+                    button.setAttribute("aria-pressed", String(isActive));
+                });
+            }
+
+            function clearActive(buttons) {
+                buttons.forEach(function (button) {
+                    button.classList.remove("is-active");
+                    button.setAttribute("aria-pressed", "false");
+                });
+            }
+
+            // 定点视角。方位/俯仰是球坐标,半径沿用当前的取景距离,所以切角度
+            // 不会顺带改变远近;取景按钮反过来只改半径和注视点。
+            var viewAzimuth = 0;
+            var viewPolar = Math.PI / 2;
+            var viewZoom = "full";
+
+            function applyView(animated) {
+                if (!homeView) {
+                    return;
                 }
-                if (verticalRange) {
-                    verticalRange.value = "0";
-                    verticalValue.textContent = "0";
+                var span = modelBounds && !modelBounds.isEmpty()
+                    ? modelBounds.getSize(new THREE.Vector3())
+                    : new THREE.Vector3(1, 1, 1);
+                var target = homeView.target.clone();
+                var radius = homeView.position.distanceTo(homeView.target);
+                if (viewZoom === "face") {
+                    // 头顶往下约一个头高。脸部在这些模型上大概占身高的 1/7。
+                    target.y = modelBounds.max.y - span.y * 0.09;
+                    radius *= 0.26;
+                } else if (viewZoom === "feet") {
+                    target.y = modelBounds.min.y + span.y * 0.06;
+                    radius *= 0.3;
                 }
+                radius = Math.min(Math.max(radius, controls.minDistance), controls.maxDistance);
+                var next = new THREE.Vector3(
+                    target.x + radius * Math.sin(viewPolar) * Math.sin(viewAzimuth),
+                    target.y + radius * Math.cos(viewPolar),
+                    target.z + radius * Math.sin(viewPolar) * Math.cos(viewAzimuth)
+                );
+                if (animated === false) {
+                    camera.position.copy(next);
+                    controls.target.copy(target);
+                } else {
+                    viewTween = {
+                        from: camera.position.clone(),
+                        to: next,
+                        fromTarget: controls.target.clone(),
+                        toTarget: target,
+                        start: (window.performance || Date).now(),
+                        duration: 260
+                    };
+                }
+                controls.update();
+                viewInteracted = true;
+            }
+
+            var VIEW_PRESETS = {
+                front: [0, Math.PI / 2],
+                left: [-Math.PI / 2, Math.PI / 2],
+                right: [Math.PI / 2, Math.PI / 2],
+                back: [Math.PI, Math.PI / 2],
+                // 不用正上/正下:极点处方位角退化,镜头会绕着自己转。
+                top: [0, Math.PI / 7],
+                bottom: [0, Math.PI - Math.PI / 7]
+            };
+
+            function selectViewPreset(key) {
+                var preset = VIEW_PRESETS[key];
+                if (!preset) {
+                    return;
+                }
+                viewAzimuth = preset[0];
+                viewPolar = preset[1];
+                markActive(viewPresetButtons, "viewPreset", key);
+                applyView(true);
+            }
+
+            function selectViewZoom(key) {
+                viewZoom = key;
+                markActive(viewZoomButtons, "viewZoom", key);
+                applyView(true);
+            }
+
+            // 定点视角之间瞬移会让人分不清转到哪一面了,尤其正面和背面这两个
+            // 差 180° 的。260ms 的缓动够看出转向,又不至于等。
+            function stepViewTween(time) {
+                if (!viewTween) {
+                    return;
+                }
+                var progress = (time - viewTween.start) / viewTween.duration;
+                if (progress >= 1) {
+                    camera.position.copy(viewTween.to);
+                    controls.target.copy(viewTween.toTarget);
+                    viewTween = null;
+                    return;
+                }
+                var eased = progress < 0.5
+                    ? 2 * progress * progress
+                    : 1 - Math.pow(-2 * progress + 2, 2) / 2;
+                camera.position.lerpVectors(viewTween.from, viewTween.to, eased);
+                controls.target.lerpVectors(viewTween.fromTarget, viewTween.toTarget, eased);
+            }
+
+            // 从画布上拖过之后,球坐标要跟上镜头的实际位置,否则下一次点定点
+            // 视角会从一个陈旧的角度插值过去,看起来像是跳了一下。
+            function syncViewFromCamera() {
+                var offset = camera.position.clone().sub(controls.target);
+                var radius = offset.length();
+                if (radius < 1e-6) {
+                    return;
+                }
+                viewAzimuth = Math.atan2(offset.x, offset.z);
+                viewPolar = Math.acos(Math.min(1, Math.max(-1, offset.y / radius)));
+                clearActive(viewPresetButtons);
             }
 
             // Box3.setFromObject reads each mesh's bind-pose geometry bounds and
@@ -866,6 +1211,7 @@
                 }
                 var center = bounds.getCenter(new THREE.Vector3());
                 var size = bounds.getSize(new THREE.Vector3());
+                modelBounds = bounds;
                 modelHeight = Math.max(size.y, 0.1);
                 var visibleSize = Math.max(size.y, size.x / Math.max(0.4, camera.aspect), 0.1);
                 var distance = (visibleSize * 0.5) / Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5));
@@ -874,9 +1220,149 @@
                     target: center,
                     position: new THREE.Vector3(center.x, center.y, center.z + distance)
                 };
-                controls.minDistance = Math.max(0.05, distance * 0.38);
+                // 0.38 倍还看不清鞋底和裙摆内侧这种指头大的地方。近裁面是
+                // 0.01,推到 0.12 倍仍然差一个数量级,不会穿进模型里。
+                controls.minDistance = Math.max(0.05, distance * 0.12);
                 controls.maxDistance = Math.max(2, distance * 4);
                 resetView();
+                // 换武器、换动作都会改变跨度,影子要跟着重新贴。
+                positionGroundShadow();
+            }
+
+            // 地面阴影。
+            //
+            // 原本这块是 .model-3d-canvas::before 的一个 CSS 椭圆,钉在画布
+            // bottom:10%。它贴的是视口而不是脚下:镜头一动,人和影子就分开,
+            // 俯视时更是直接飘在半空。镜头限制放开之后这个问题从"看不出来"
+            // 变成"每个角度都不对"。
+            //
+            // 游戏自己有 model/shadow/shadow_battle.muast:一张 4 顶点的贴片,
+            // unlit、BLEND、depthWrite=false,就是张地面贴花。直接用它,位置
+            // 跟着包围盒底面走,于是影子永远在脚下。
+            var shadowObject = null;
+
+
+            // shadow_battle.muast 的贴片不是平的。四个顶点是
+            // (±0.2238, -0.0873, +0.2061) 和 (±0.2238, +0.0873, -0.2061),
+            // 法线 (0, 0.921, 0.390),绕 X 倾了 23°。游戏里战斗镜头俯角固定,
+            // 一张按那个俯角倾斜的贴片正好看着像贴在地上;这里镜头能自由转,
+            // 倾斜就露出来了 —— 玩家模型上是脚下一团斜着的暗影(垂直跨度实测
+            // 0.312),敌人 model_en_6230 上因为还被放到了脚底下 0.3,直接变成
+            // 模型下方一块独立的深色斜板,也就是反馈里问的"模型下面是什么"。
+            //
+            // 角度从几何本身算,不写死 23°:同一份贴片将来若换了版本,这里跟着变。
+            // 量的是世界法线而不是局部法线 —— 贴片和它所在的根之间还有
+            // MeshRoot_Shadow_battle / Shadow_battle(Clone) 两层,它们自己带变换,
+            // 按局部法线转会把倾斜转反(实测垂直跨度从 0.337 变成 0.620)。
+            function shadowQuadWorldNormal(root) {
+                var mesh = null;
+                root.traverse(function (child) {
+                    if (!mesh && child.isMesh && child.geometry
+                        && child.geometry.attributes && child.geometry.attributes.position) {
+                        mesh = child;
+                    }
+                });
+                if (!mesh) {
+                    return null;
+                }
+                var position = mesh.geometry.attributes.position;
+                if (position.count < 3) {
+                    return null;
+                }
+                mesh.updateWorldMatrix(true, false);
+                var a = new THREE.Vector3().fromBufferAttribute(position, 0).applyMatrix4(mesh.matrixWorld);
+                var b = new THREE.Vector3().fromBufferAttribute(position, 1).applyMatrix4(mesh.matrixWorld);
+                var c = new THREE.Vector3().fromBufferAttribute(position, 2).applyMatrix4(mesh.matrixWorld);
+                var normal = new THREE.Vector3()
+                    .subVectors(b, a)
+                    .cross(new THREE.Vector3().subVectors(c, a));
+                if (normal.lengthSq() < 1e-12) {
+                    return null;
+                }
+                normal.normalize();
+                if (normal.y < 0) {
+                    normal.negate();
+                }
+                return normal;
+            }
+
+            // 贴片放进场景、位置和缩放都定好之后再压平:此时世界矩阵是最终的那份。
+            function flattenGroundShadow() {
+                if (!shadowObject) {
+                    return;
+                }
+                shadowObject.rotation.set(0, 0, 0);
+                shadowObject.updateMatrixWorld(true);
+                var normal = shadowQuadWorldNormal(shadowObject);
+                if (!normal) {
+                    return;
+                }
+                var turn = new THREE.Quaternion().setFromUnitVectors(
+                    normal,
+                    new THREE.Vector3(0, 1, 0)
+                );
+                shadowObject.quaternion.premultiply(turn);
+                shadowObject.updateMatrixWorld(true);
+            }
+
+            function mountGroundShadow() {
+                if (shadowObject || disposed || !modelObject || !activeLoader) {
+                    return Promise.resolve();
+                }
+                var shadowPreview = MODEL_PREVIEWS["model/shadow/shadow_battle.muast"];
+                if (!shadowPreview) {
+                    return Promise.resolve();
+                }
+                return cacheModel(shadowPreview.file, shadowPreview.compression)
+                    .then(function (sourceUrl) {
+                        return new Promise(function (resolve) {
+                            activeLoader.load(sourceUrl, function (gltf) {
+                                if (disposed || !modelObject) {
+                                    disposeObjectResources(gltf.scene);
+                                    resolve();
+                                    return;
+                                }
+                                shadowObject = gltf.scene;
+                                shadowObject.traverse(function (child) {
+                                    if (!child.isMesh || !child.material) {
+                                        return;
+                                    }
+                                    // 贴花:混合、不写深度、不参与拾取。渲染顺序
+                                    // 压到 -1,保证先画在所有角色层之前。
+                                    child.material.transparent = true;
+                                    child.material.depthWrite = false;
+                                    child.material.depthTest = true;
+                                    child.material.side = THREE.DoubleSide;
+                                    child.renderOrder = -1;
+                                    child.frustumCulled = false;
+                                });
+                                scene.add(shadowObject);
+                                positionGroundShadow();
+                                resolve();
+                            }, undefined, resolve);
+                        });
+                    })
+                    .catch(function () { /* 影子缺失不该拖垮模型本身 */ });
+            }
+
+            function positionGroundShadow() {
+                if (!shadowObject || !modelBounds || modelBounds.isEmpty()) {
+                    return;
+                }
+                var size = modelBounds.getSize(new THREE.Vector3());
+                var center = modelBounds.getCenter(new THREE.Vector3());
+                // 贴片自身约 0.45 宽。按站姿的横向跨度定尺寸,再放宽一点让影子
+                // 比脚略大;敌人体型差得很远,固定倍数会明显不对。
+                var footprint = Math.max(size.x, size.z) * 1.15;
+                shadowObject.scale.setScalar(Math.max(0.2, footprint / 0.4476));
+                // 高度用模型自己的原点平面 y=0,不用 modelBounds.min.y。
+                // modelBounds 是按骨骼采样的,包含隐藏部件和伸到地面以下的骨头:
+                // model_pl_130402 的 min.y 是 -0.009(脚就在地上,凑巧对得上),
+                // 而 model_en_6230 的是 -0.319,它的脚其实在 -0.011 —— 按 min.y
+                // 放就把影子丢到脚下 0.3 处,成了一块单独的板。角色是按站在
+                // y=0 上做的,那才是地面。
+                shadowObject.position.set(center.x, size.y * 0.002, center.z);
+                flattenGroundShadow();
             }
 
             var ACTION_LABELS = {
@@ -990,6 +1476,24 @@
                     heading.className = "model-control-heading";
                     heading.innerHTML = "<strong>" + escapeHtml(group.label) + "</strong><small>" + escapeHtml(group.note) + "</small>";
                     section.appendChild(heading);
+                    // 演出开关只挂在大招那一组，而且只在这个角色真的导出过演出
+                    // 场景时出现。关掉是为了能单看动作本身 —— 过场的相机会怼到
+                    // 脸上，想检查动作反而看不见。
+                    if (group.key === "ultimate" && cinematicAvailable) {
+                        var stageRow = document.createElement("div");
+                        stageRow.className = "model-cinematic-row";
+                        cinematicButton = document.createElement("button");
+                        cinematicButton.type = "button";
+                        cinematicButton.dataset.cinematicToggle = "1";
+                        cinematicButton.title = "播放游戏原本的过场：背景、特效和被动画驱动的正交相机";
+                        cinematicButton.addEventListener("click", toggleCinematic);
+                        cinematicStatus = document.createElement("small");
+                        cinematicStatus.className = "model-cinematic-status";
+                        stageRow.appendChild(cinematicButton);
+                        stageRow.appendChild(cinematicStatus);
+                        section.appendChild(stageRow);
+                        syncCinematicButton();
+                    }
                     var strip = document.createElement("div");
                     strip.className = "model-action-strip";
                     strip.setAttribute("role", "group");
@@ -1148,6 +1652,93 @@
                     base = base.slice(0, match.index);
                 }
                 return { base: base, rank: rank };
+            }
+
+            // _L / _R is two different things depending on the part. leg_L_A and
+            // leg_R_A are a genuine pair — left leg, right leg, disjoint in x, both
+            // belong on screen. hat_L and hat_R are the same hat authored twice for
+            // the two facing directions: same 241 triangles, same y and z, x
+            // -0.214..0.173 against -0.198..0.201. Drawing both puts two
+            // alpha-masked shells in the same place, and that is the head flicker
+            // on model_en_6230.
+            //
+            // Naming cannot tell the two cases apart, so this does not try: it
+            // compares the world boxes. A real left/right pair barely overlaps; a
+            // facing variant sits almost exactly on top of its partner.
+            //
+            // Measured over the whole catalogue. 1859 bundles have 188 models with
+            // a matched _L/_R mesh pair, but 182 of those are player models whose
+            // hat pair the visibility table already governs, so the exposure here
+            // is six enemies:
+            //
+            //   model_en_4200  en_4200_weapon   IoU 0.000   1500 / 1098 tris
+            //   model_en_4230  en_4200_weapon   IoU 0.000   1500 / 1098 tris
+            //   model_en_5000  en_5000_weapon   IoU 0.000    630 /  216 tris
+            //   model_en_6100  en_6100_weapon   IoU 0.241    260 / 1028 tris
+            //   model_en_6130  en_6100_weapon   IoU 0.244    260 / 1028 tris
+            //   model_en_6230  hat              IoU 0.867    241 /  241 tris
+            //
+            // The gap between 0.244 and 0.867 is empty, so 0.5 is not a tuned
+            // number. Triangle counts say the same thing independently: the five
+            // genuine pairs are different meshes, the facing variant is the same
+            // mesh twice.
+            function boxOverlapRatio(a, b) {
+                var inter = 1;
+                var union = 0;
+                for (var axis = 0; axis < 3; axis += 1) {
+                    var lo = Math.max(a.min[axis], b.min[axis]);
+                    var hi = Math.min(a.max[axis], b.max[axis]);
+                    inter *= Math.max(0, hi - lo);
+                }
+                var volA = (a.max[0] - a.min[0]) * (a.max[1] - a.min[1]) * (a.max[2] - a.min[2]);
+                var volB = (b.max[0] - b.min[0]) * (b.max[1] - b.min[1]) * (b.max[2] - b.min[2]);
+                union = volA + volB - inter;
+                return union > 0 ? inter / union : 0;
+            }
+
+            function worldBoxOf(node, THREE) {
+                var box = new THREE.Box3().setFromObject(node);
+                if (box.isEmpty()) {
+                    return null;
+                }
+                return { min: box.min.toArray(), max: box.max.toArray() };
+            }
+
+            var FACING_VARIANT_OVERLAP = 0.5;
+
+            function hideEnemyFacingVariants(THREE) {
+                var pairs = {};
+                enemyVariantParts.forEach(function (entry) {
+                    var match = /^(.*)_([lr])$/.exec(String(entry.name || "").toLowerCase());
+                    if (!match) {
+                        return;
+                    }
+                    pairs[match[1]] = pairs[match[1]] || {};
+                    pairs[match[1]][match[2]] = entry;
+                });
+                var hidden = 0;
+                Object.keys(pairs).forEach(function (base) {
+                    var left = pairs[base].l;
+                    var right = pairs[base].r;
+                    if (!left || !right || !left.node.visible || !right.node.visible) {
+                        return;
+                    }
+                    var boxL = worldBoxOf(left.node, THREE);
+                    var boxR = worldBoxOf(right.node, THREE);
+                    if (!boxL || !boxR) {
+                        return;
+                    }
+                    var ratio = boxOverlapRatio(boxL, boxR);
+                    if (ratio < FACING_VARIANT_OVERLAP) {
+                        return;
+                    }
+                    // Keep _L, matching the l30_ face layers the viewer already
+                    // treats as the front-facing set.
+                    right.node.visible = false;
+                    right.node.userData.facingVariantOf = left.name;
+                    hidden += 1;
+                });
+                return hidden;
             }
 
             function hideEnemyDuplicateVariants() {
@@ -1493,9 +2084,14 @@
             }
 
             function selectAction(action) {
+                var leavingUltimate = cinematic && actionGroupOf(action) !== "ultimate";
                 activeAction = action;
                 if (modelKind === "enemy" && !clipByName[action]) {
                     enemyMotionTime = 0;
+                }
+                // 挑了别的动作就退出演出：过场的相机和背景只对大招成立。
+                if (leavingUltimate) {
+                    exitCinematic();
                 }
                 // Selecting a game action is an explicit request to show the
                 // matching in-game expression. Manual component edits remain
@@ -1539,6 +2135,12 @@
                 // exported clip name the same way clipByName is.
                 selectVisibilityClip(selectedButton.dataset.clip);
                 updateTransport(true);
+                // 点大招就上演出。mountCinematic 会在挂好之后回头调一次
+                // selectAction("skill")，那时 cinematic 已经非空，所以不会递归。
+                if (cinematicWanted && cinematicAvailable && !cinematic
+                    && actionGroupOf(activeAction) === "ultimate") {
+                    enterCinematic();
+                }
             }
 
             function applyLoopMode(action) {
@@ -2104,6 +2706,13 @@
                 camera.aspect = width / height;
                 camera.updateProjectionMatrix();
                 renderer.setSize(width, height, false);
+                if (cinematic) {
+                    // 正交相机的 left/right 由播放器按 aspect 每帧重算。演出
+                    // 的比例是作品自己的 3:2，跟面板大小无关 —— 面板变了只是
+                    // 黑边变宽变窄，构图不动，所以这里交回去的仍是 3:2，
+                    // 重设一次是为了让视锥按当前帧的 orthoSize 重建。
+                    cinematic.player.setAspect(cinematicAspect());
+                }
                 // Reframe only while the visitor has not taken manual control of
                 // the camera, so mobile browser chrome and panel resizes never
                 // yank the view (or drift while an animation plays).
@@ -2118,10 +2727,23 @@
             controls.dampingFactor = 0.08;
             controls.enablePan = true;
             controls.screenSpacePanning = true;
-            controls.minAzimuthAngle = -Math.PI / 12;
-            controls.maxAzimuthAngle = Math.PI / 12;
-            controls.minPolarAngle = Math.PI / 2 - Math.PI / 18;
-            controls.maxPolarAngle = Math.PI / 2 + Math.PI / 18;
+            // 原本方位角锁在 ±15°、俯仰锁在水平 ±10°,等于画布上拖不动:
+            // 想改构图只能去右边拉「模型大小」和「上下位置」两根滑块,而那
+            // 两根滑块动的是模型自身的 scale 和 position,不是镜头。想看鞋底
+            // 或者背面的接缝就完全没有办法 —— 之前判断不了脚的问题就是因为
+            // 根本转不过去。
+            //
+            // 放开限制是安全的:renderOrder 取自游戏自己的 m_HieIndex /
+            // m_eRenderStage,是每个网格固定的值,不随视角变;材质留在不透明
+            // 队列并照常写深度,所以遮挡由深度测试逐片元决定。游戏自己在战斗
+            // 里也是一边转镜头一边用这套顺序。
+            //
+            // 俯仰留 6° 余量避开正下方/正上方:极点处 OrbitControls 的
+            // 方位角会退化,镜头会绕着自己打转。
+            controls.minAzimuthAngle = -Infinity;
+            controls.maxAzimuthAngle = Infinity;
+            controls.minPolarAngle = Math.PI / 30;
+            controls.maxPolarAngle = Math.PI - Math.PI / 30;
             controls.addEventListener("start", function () {
                 viewInteracted = true;
             });
@@ -2329,6 +2951,9 @@
                                             // that shell over the weapon, so the whole
                                             // model turns black.
                                             child.material.side = THREE.FrontSide;
+                                            if (fringeHelpers) {
+                                                fringeHelpers.dilateMaterialTextures(child.material, THREE, FRINGE_OPTIONS);
+                                            }
                                         }
                                     });
                                     mountedWeaponParts.push(part);
@@ -2384,6 +3009,344 @@
 
             function loadSkillActionClips(loader) {
                 return loadRetargetedClips(loader, skillActionSource(), "大招动作");
+            }
+
+            // --- とっておき 演出 ------------------------------------------------
+            //
+            // 演出场景只对 asset/uniqueskill/ 里导出过的资源 ID 存在（177 个,
+            // 全是 ★5）。没有导出的模型照旧只播动作,不假装有过场。
+            function cinematicResourceId() {
+                var match = /model_pl_(\d+)/.exec(String(preview.file || ""));
+                return match ? match[1] : null;
+            }
+
+            function probeCinematic() {
+                var id = cinematicResourceId();
+                if (!id || modelKind !== "player" || !modelHasTotteoki) {
+                    return;
+                }
+                loadCinematicModule().then(function (us) {
+                    return us.loadSceneIndex();
+                }).then(function (index) {
+                    if (disposed) {
+                        return;
+                    }
+                    var scenes = index.scenes || index;
+                    if (!scenes[id]) {
+                        return;
+                    }
+                    cinematicAvailable = true;
+                    // 目录已经挂好了才探到,就地补上开关,不重建整条动作条。
+                    if (actionStrip && actionStrip.children.length) {
+                        mountActionControls(currentClipList());
+                    }
+                }).catch(function () { /* 没有演出就沉默降级 */ });
+            }
+
+            function currentClipList() {
+                return Object.keys(clipByName).map(function (name) {
+                    return clipByName[name];
+                });
+            }
+
+            function setCinematicStatus(text, busy) {
+                if (!cinematicStatus) {
+                    return;
+                }
+                cinematicStatus.textContent = text || "";
+                cinematicStatus.classList.toggle("is-busy", Boolean(busy));
+            }
+
+            // 演出用的是场景里那台正交相机，画布比例变了要重算。
+            // 演出的画面比例由作品本身决定，不是观察台面板的比例。
+            //
+            // 时间轴里那台相机带着 Unity 的物理感光尺寸 apertureWidth 35.9999 /
+            // apertureHeight 24.0，也就是 3:2；orthoSize/orthoDivisor =
+            // 176.9844/354 刚好 0.5，即基准画面高一个世界单位。正交相机的
+            // 左右是 半高 × 比例 算出来的，所以比例一变构图就跟着变：拿面板
+            // 的比例（通常比 3:2 窄）去渲染，两侧会被裁掉 —— 量下来第 40 帧
+            // 角色只剩 102/166 根骨骼在画面内，人从右边出画。
+            //
+            // 所以按 3:2 渲染，在面板里加黑边，而不是把构图拉去适配面板。
+            function cinematicAspect(timeline) {
+                var source = timeline || (cinematic ? cinematic.timeline : null);
+                var camera = source ? source.camera : null;
+                if (camera && camera.apertureWidth && camera.apertureHeight) {
+                    return camera.apertureWidth / camera.apertureHeight;
+                }
+                return 1.5;
+            }
+
+            // 面板里那块 3:2 的画面，单位是 CSS 像素（three 自己会乘
+            // pixelRatio）。窄面板上下留边，宽面板左右留边。
+            function cinematicViewport() {
+                var width = Math.max(1, host.clientWidth);
+                var height = Math.max(1, host.clientHeight);
+                var aspect = cinematicAspect();
+                var w = width;
+                var h = Math.round(width / aspect);
+                if (h > height) {
+                    h = height;
+                    w = Math.round(height * aspect);
+                }
+                return {
+                    x: Math.round((width - w) / 2),
+                    y: Math.round((height - h) / 2),
+                    width: w,
+                    height: h
+                };
+            }
+
+            function enterCinematic() {
+                if (!cinematicAvailable || cinematic || disposed) {
+                    return;
+                }
+                var id = cinematicResourceId();
+                var token = ++cinematicRequest;
+                setCinematicStatus("载入演出…", true);
+                loadCinematicModule().then(function (us) {
+                    return Promise.all([
+                        us.loadTimeline(id),
+                        us.loadScene(id, {
+                            onProgress: function (fraction) {
+                                if (token === cinematicRequest && !disposed) {
+                                    setCinematicStatus(fraction === null
+                                        ? "解压中…"
+                                        : "载入演出 " + Math.round(fraction * 100) + "%", true);
+                                }
+                            }
+                        }),
+                        us
+                    ]);
+                }).then(function (parts) {
+                    if (token !== cinematicRequest || disposed) {
+                        // 用户已经切走了：把刚下载的场景丢掉，别挂进去。
+                        disposeObjectResources(parts[1].scene);
+                        return;
+                    }
+                    mountCinematic(parts[2], parts[0], parts[1]);
+                }).catch(function (error) {
+                    if (token === cinematicRequest && !disposed) {
+                        console.warn("とっておき 演出载入失败", error);
+                        setCinematicStatus("演出载入失败", false);
+                        cinematicWanted = false;
+                        syncCinematicButton();
+                    }
+                });
+            }
+
+            function mountCinematic(us, timeline, loaded) {
+                var root = loaded.scene;
+                // 时间轴驱动的那台正交相机。orthoSize/354 是引擎自己的换算，
+                // createPlayer 每帧会写 left/right/top/bottom，这里只要给一台
+                // 空的正交相机和当前画布比例。
+                var stageCamera = new THREE.OrthographicCamera(-1, 1, 1, -1,
+                    (timeline.camera && timeline.camera.near) || 0.1,
+                    (timeline.camera && timeline.camera.far) || 200);
+                scene.add(root);
+                // 演出者挂在场景原点，不是 loc_MY_* 上。
+                //
+                // loc_MY_0 / loc_TGT_0 是战斗队列的站位（[±0.65, -0.16, -0.65]，
+                // 左右镜像），给场上其他人和目标用；演出者由根节点上的
+                // MeigeAC_owner_body@skill / MeigeAC_owner_head@skill 代表，
+                // 两者的变换都是单位变换。位移在大招动作自己的 root 骨骼里
+                // （100003 大约 +1.12 x），相机是按这个走位构图的。
+                //
+                // 挂到 loc_MY_0 上会把 0.65 叠在这 1.12 上：量下来第 0/40/90/200
+                // 帧角色一个像素都不在画面里，正交相机的窗口在第 0 帧只有
+                // x∈[0.459, 1.312]。挂原点则六个取样点全部在框内，重心从
+                // 0.297 平移到 0.706 —— 就是过场该有的横移。
+                var slot = null;
+                root.traverse(function (child) {
+                    if (!slot && (child.userData.name || child.name) === "loc_MY_0") {
+                        slot = child;
+                    }
+                });
+                var restore = {
+                    parent: modelObject.parent,
+                    position: modelObject.position.clone(),
+                    quaternion: modelObject.quaternion.clone(),
+                    scale: modelObject.scale.clone(),
+                    shadowVisible: shadowObject ? shadowObject.visible : null
+                };
+                root.add(modelObject);
+                modelObject.position.set(0, 0, 0);
+                modelObject.quaternion.identity();
+                modelObject.scale.setScalar(1);
+                // 演出自带地面和背景，观察台那张影子贴片会浮在半空。
+                if (shadowObject) {
+                    shadowObject.visible = false;
+                }
+                var player = us.createPlayer({
+                    THREE: THREE,
+                    timeline: timeline,
+                    root: root,
+                    camera: stageCamera,
+                    audio: us.sceneAudio(cinematicResourceId()),
+                    aspect: cinematicAspect(timeline),
+                    onEvent: applyCinematicEvent
+                });
+                cinematic = {
+                    us: us,
+                    root: root,
+                    timeline: timeline,
+                    player: player,
+                    camera: stageCamera,
+                    restore: restore,
+                    slot: slot
+                };
+                // 演出的长度由时间轴说，角色动作要跟着它走而不是各跑一套时钟。
+                if (clipByName.skill) {
+                    selectAction("skill");
+                }
+                if (activeClipAction) {
+                    activeClipAction.paused = true;
+                }
+                controls.enabled = false;
+                player.seek(0);
+                player.play();
+                setCinematicStatus(timeline.duration.toFixed(1) + " 秒 · "
+                    + (timeline.channels || []).length + " 条通道", false);
+                syncCinematicButton();
+                resize();
+            }
+
+            // 按 3:2 渲染演出，面板剩下的部分留黑边。
+            //
+            // 先在整块画布上清一次，再开裁剪：裁剪开着的时候 clear 只作用在
+            // 裁剪框内，边上会留着上一帧的残像。渲染完把视口和裁剪都放回整块
+            // 画布，普通观察模式和 grab() 才不会拿到一块偏移的画面。
+            function renderCinematicFrame() {
+                var rect = cinematicViewport();
+                var width = Math.max(1, host.clientWidth);
+                var height = Math.max(1, host.clientHeight);
+                renderer.setScissorTest(false);
+                renderer.setViewport(0, 0, width, height);
+                renderer.clear();
+                renderer.setViewport(rect.x, rect.y, rect.width, rect.height);
+                renderer.setScissor(rect.x, rect.y, rect.width, rect.height);
+                renderer.setScissorTest(true);
+                renderer.render(scene, cinematic.camera);
+                renderer.setScissorTest(false);
+                renderer.setViewport(0, 0, width, height);
+                renderer.setScissor(0, 0, width, height);
+            }
+
+            // 把角色骨骼拨到时间轴当前帧对应的时刻。
+            //
+            // 只有一条时钟：动作的时间由时间轴的帧数换算，不让 mixer 自己走 ——
+            // 两套时钟一定会漂，而这段过场的相机切点是按帧卡在动作上的。
+            // 单独成函数是因为按帧 seek（诊断、拖进度）也要能把骨骼带过去，
+            // 否则骨架会停在实时播放最后留下的那个姿势上。
+            function syncClipToCinematic() {
+                if (!cinematic || !activeClipAction || !cinematic.player.fps) {
+                    return;
+                }
+                var seconds = cinematic.player.frame / cinematic.player.fps;
+                var clipLength = activeClipAction.getClip().duration;
+                activeClipAction.time = clipLength > 0
+                    ? Math.min(seconds, clipLength)
+                    : 0;
+                if (mixer) {
+                    mixer.update(0);
+                }
+            }
+
+            // 帧事件里只有几条会改我们这边的状态；其余是给战斗场景里的其他
+            // 单位用的，观察台只有演出者一个人。
+            //
+            // 特别是 my*OnOff 这一组：提取器分出了 mySingleOnOff(120)、
+            // myAllOnOff(121)、myOnOff(122) 三个事件，121 关的是站在
+            // loc_MY_* 上的「我方全体」，不是演出者本人 —— 100003 在第 0 帧
+            // 就发 myAllOnOff(0)，一直到第 360 帧（共 511 帧）才恢复，而这段
+            // 时间相机恰好正对着 loc_MY_0 拍演出者的起手式。曾经把它接到
+            // modelObject.visible 上，结果人在自己的大招里消失了 12 秒。
+            // 观察台没有我方队列，所以这条事件在这里本就无事可做。
+            function applyCinematicEvent(event) {
+                if (!event || disposed) {
+                    return;
+                }
+                var on = event.args && event.args.length ? Boolean(event.args[0]) : true;
+                if (event.event === "weaponVisible") {
+                    setWeaponVisible(on);
+                } else if (event.event === "setFacial") {
+                    applyCinematicFacial(event.args && event.args[0]);
+                }
+            }
+
+            function exitCinematic() {
+                cinematicRequest += 1;
+                if (!cinematic) {
+                    setCinematicStatus("", false);
+                    syncCinematicButton();
+                    return;
+                }
+                var previous = cinematic;
+                cinematic = null;
+                if (modelObject) {
+                    var restore = previous.restore;
+                    (restore.parent || scene).add(modelObject);
+                    modelObject.position.copy(restore.position);
+                    modelObject.quaternion.copy(restore.quaternion);
+                    modelObject.scale.copy(restore.scale);
+                    modelObject.visible = true;
+                }
+                if (shadowObject && previous.restore.shadowVisible !== null) {
+                    shadowObject.visible = previous.restore.shadowVisible;
+                }
+                scene.remove(previous.root);
+                disposeObjectResources(previous.root);
+                if (activeClipAction) {
+                    activeClipAction.paused = false;
+                }
+                controls.enabled = true;
+                setCinematicStatus("", false);
+                syncCinematicButton();
+                // 过场用的正交相机和观察台的透视相机比例算法不同,回来要重算。
+                resize();
+                fitModelView(true);
+            }
+
+            function toggleCinematic() {
+                cinematicWanted = !cinematicWanted;
+                syncCinematicButton();
+                if (cinematicWanted) {
+                    if (actionGroupOf(activeAction) === "ultimate") {
+                        enterCinematic();
+                    }
+                } else {
+                    exitCinematic();
+                }
+            }
+
+            // weaponVisible(0) 在演出开头把武器收起来，等角色摆好架势的那一帧
+            // 再放出来。挂载的部件是现成的，不必重新取一次 GLB。
+            function setWeaponVisible(visible) {
+                mountedWeaponParts.forEach(function (part) {
+                    part.visible = visible;
+                });
+            }
+
+            // setFacial 带的是 facialID，和动作事件用的是同一套编号，所以直接
+            // 走既有的 facialID -> 状态索引查表。没有表就跳过，不猜。
+            function applyCinematicFacial(facialId) {
+                if (!facialTable || !Number.isFinite(facialId)) {
+                    return;
+                }
+                var index = facialStateForId(facialId, 0);
+                if (index >= 0) {
+                    applyFacialState(index, true);
+                }
+            }
+
+            function syncCinematicButton() {
+                if (!cinematicButton) {
+                    return;
+                }
+                var on = cinematicWanted;
+                cinematicButton.classList.toggle("is-active", on);
+                cinematicButton.setAttribute("aria-pressed", String(on));
+                cinematicButton.textContent = on ? "演出：开" : "演出：关";
             }
 
             function loadRetargetedClips(loader, source, what) {
@@ -2465,6 +3428,7 @@
                 loader.setMeshoptDecoder(MeshoptDecoder);
                 // 大招按需加载时要用同一个 loader（已装好 meshopt 解码器）。
                 skillLoader = loader;
+                activeLoader = loader;
                 loader.load(sourceUrl, function (gltf) {
                     if (disposed) {
                         return;
@@ -2542,13 +3506,24 @@
                             // 让这些边交给已经在平滑几何边缘的多重采样缓冲去解算。
                             // 材质仍然是不透明并继续写深度，所以上面那套队列顺序
                             // 和接缝修复完全不受影响。
+                            //
+                            // 试过换成真正的 alpha 混合,交叉比对之后是退步,
+                            // 见上面 mount3DModel 前的那段。
                             child.material.alphaToCoverage = !blended;
+                            child.material.userData.edgeBlended = true;
                             // 各向异性过滤：mipmap 会在斜视时整体降级，裙摆、袖子
                             // 和鞋子朝地的那一面因此发糊。
                             if (maxAnisotropy > 1 && child.material.map
                                 && child.material.map.anisotropy !== maxAnisotropy) {
                                 child.material.map.anisotropy = maxAnisotropy;
                                 child.material.map.needsUpdate = true;
+                            }
+                            // 把不透明区的颜色往 alpha 斜坡里推一层，斜坡本身
+                            // 照旧被 cutoff 保留，只是不再是黑的。贴图在材质
+                            // 之间共享，模块内部有 WeakSet 去重，重复调用不会
+                            // 重复处理。
+                            if (fringeHelpers) {
+                                fringeHelpers.dilateMaterialTextures(child.material, THREE, FRINGE_OPTIONS);
                             }
                             // Weapons carry their cartoon outline as an inverted
                             // hull mapped to a black texel, so they must cull
@@ -2586,12 +3561,115 @@
                             renderer: renderer,
                             scene: scene,
                             camera: camera,
-                            render: function () { renderer.render(scene, camera); },
+                            THREE: THREE,
+                            // 当前真正在用的那台相机。演出期间是时间轴驱动的
+                            // 正交相机,不是观察台的透视相机 —— 一开始这个句柄
+                            // 写死了 camera,于是演出的测量全都取到一张空画面,
+                            // 看起来像"什么都没渲染出来"。
+                            activeCamera: function () {
+                                return cinematic ? cinematic.camera : camera;
+                            },
+                            // 演出挂载后的整套句柄（root/timeline/player/camera）,
+                            // 没进演出时是 null。诊断脚本靠它按帧 seek 再量画面,
+                            // 不然只能等实时播到那一帧。
+                            cinematic: function () {
+                                return cinematic;
+                            },
+                            syncClipToCinematic: syncClipToCinematic,
+                            render: function () {
+                                if (cinematic) {
+                                    renderCinematicFrame();
+                                } else {
+                                    renderer.render(scene, camera);
+                                }
+                            },
+                            // screenshot() 合成的是 CSS 尺寸的图,浏览器会先把
+                            // 绘制缓冲降采样一遍,超采样的效果因此永远量不出来
+                            // (之前就是这样得出"提高 pixelRatio 没有变化"的
+                            // 假结论)。这里直接取绘制缓冲本身。
+                            grab: function () {
+                                if (cinematic) {
+                                    renderCinematicFrame();
+                                } else {
+                                    renderer.render(scene, camera);
+                                }
+                                return {
+                                    width: renderer.domElement.width,
+                                    height: renderer.domElement.height,
+                                    data: renderer.domElement.toDataURL("image/png")
+                                };
+                            },
                             setPixelRatio: function (value) {
                                 renderer.setPixelRatio(value);
                                 resize();
                             },
                             duplicatesHidden: function () { return duplicateMeshesHidden; },
+                            facingVariantsHidden: function () { return facingVariantsHidden; },
+                            // 用取景时算好的那份包围盒(它按骨骼采样,不是 bind
+                            // pose),测量脚本才能把"模型真实顶端"投到画面上,
+                            // 判断某处的着色是不是画到了几何之外。
+                            bounds: function () {
+                                if (!modelBounds || modelBounds.isEmpty()) { return null; }
+                                return {
+                                    min: modelBounds.min.toArray(),
+                                    max: modelBounds.max.toArray()
+                                };
+                            },
+                            // alpha-to-coverage 只有 4 个采样,覆盖率因此被量化
+                            // 成 5 档;真正的混合有 8 bit。用它对比哪种更平滑。
+                            setBlendMode: function (mode) {
+                                var count = 0;
+                                modelObject.traverse(function (child) {
+                                    if (!child.isMesh) { return; }
+                                    [].concat(child.material).forEach(function (material) {
+                                        if (!material || !material.userData.edgeBlended) {
+                                            return;
+                                        }
+                                        if (mode === "blend") {
+                                            material.alphaToCoverage = false;
+                                            material.transparent = true;
+                                            material.blending = THREE.NormalBlending;
+                                            material.depthWrite = true;
+                                        } else if (mode === "custom") {
+                                            // NormalBlending + transparent=false
+                                            // 会被强制成 NoBlending,而
+                                            // CustomBlending 照样混合,同时留在
+                                            // 不透明队列里 —— 主排序键因此仍然
+                                            // 是游戏自己写下的 renderOrder,而不
+                                            // 是相机距离。
+                                            material.alphaToCoverage = false;
+                                            material.transparent = false;
+                                            material.blending = THREE.CustomBlending;
+                                            material.blendSrc = THREE.SrcAlphaFactor;
+                                            material.blendDst = THREE.OneMinusSrcAlphaFactor;
+                                            material.blendSrcAlpha = THREE.OneFactor;
+                                            material.blendDstAlpha = THREE.OneMinusSrcAlphaFactor;
+                                            material.depthWrite = true;
+                                        } else {
+                                            material.alphaToCoverage = true;
+                                            material.transparent = false;
+                                            material.blending = THREE.NormalBlending;
+                                            material.depthWrite = true;
+                                        }
+                                        material.needsUpdate = true;
+                                        count += 1;
+                                    });
+                                });
+                                return count;
+                            },
+                            edgeBlended: function () {
+                                var total = 0;
+                                var patched = 0;
+                                modelObject.traverse(function (child) {
+                                    if (!child.isMesh) { return; }
+                                    [].concat(child.material).forEach(function (material) {
+                                        if (!material) { return; }
+                                        total += 1;
+                                        if (material.userData.edgeBlended) { patched += 1; }
+                                    });
+                                });
+                                return { total: total, patched: patched };
+                            },
                             // Stop the clip so two captures differ only by what
                             // the test changed, not by where the idle loop got to.
                             freeze: function () { motionEnabled = false; },
@@ -2737,6 +3815,12 @@
                             });
                     }
                     hideEnemyDuplicateVariants();
+                    // After the rank pass, so a hat_R that already lost to a
+                    // hat_R_2 is not re-examined, and world matrices are current.
+                    if (modelKind === "enemy") {
+                        modelObject.updateMatrixWorld(true);
+                        facingVariantsHidden = hideEnemyFacingVariants(THREE);
+                    }
                     // Before dedup, so the nodes the table owns are marked and
                     // dedup leaves them alone.
                     indexVisibilityNodes();
@@ -2808,8 +3892,19 @@
                         modelObject.updateMatrixWorld(true);
                         fitModelView();
                         host.classList.add("is-ready");
+                        // 只查一次索引（约 60 KiB，之后模块内缓存），确认这个
+                        // 角色导出过演出场景才把开关放出来。不阻塞首帧。
+                        probeCinematic();
+                        // 影子要等 fitModelView 之后:它按 modelBounds 定位。
+                        return mountGroundShadow();
                     });
-                }, undefined, function () {
+                }, undefined, function (error) {
+                    // GLTFLoader 把 onLoad 里抛出的异常也送到这里,所以真正的
+                    // 原因可能是本文件的 bug,而不是文件损坏。不打出来就只剩
+                    // 一句"解析失败",查不下去。
+                    if (window.console && console.error) {
+                        console.error("GLB load failed", error);
+                    }
                     showViewerError("GLB 模型解析失败，文件可能已损坏或下载不完整。");
                 });
             }).catch(function () {
@@ -2859,16 +3954,44 @@
             }
             resetButton.addEventListener("click", resetViewerState);
 
+            // 「重置」原本只动模型变换、镜头和那两根滑块,右边控制台里其余的
+            // 状态一律留在原样:速度还停在 ¼×、循环可能是关的、表情锁在手动
+            // 选的那个、武器还是「不持有」、标签页也不回到第一页。看上去就是
+            // 按了重置但界面没有重置。
             function resetViewerState() {
                 resetModelTransform();
+                viewTween = null;
+                viewAzimuth = 0;
+                viewPolar = Math.PI / 2;
+                viewZoom = "full";
+                markActive(viewPresetButtons, "viewPreset", "front");
+                markActive(viewZoomButtons, "viewZoom", "full");
+                // fitModelView 会重算取景距离和 min/max,之后 resetView 才有
+                // 正确的 homeView 可回;顺序反了会退到上一个模型的构图。
+                viewInteracted = false;
+                fitModelView(true);
                 resetView();
-                if (scaleRange) {
-                    scaleRange.value = "100";
-                    scaleValue.textContent = "100%";
+                playbackRate = 1;
+                rateButtons.forEach(function (button) {
+                    var isActive = Number(button.dataset.playbackRate) === 1;
+                    button.classList.toggle("is-active", isActive);
+                    button.setAttribute("aria-pressed", String(isActive));
+                });
+                if (loopButton && !loopPlayback) {
+                    loopPlayback = true;
+                    loopButton.classList.add("is-active");
+                    loopButton.setAttribute("aria-pressed", "true");
+                    loopButton.title = "循环播放（L）";
                 }
-                if (verticalRange) {
-                    verticalRange.value = "0";
-                    verticalValue.textContent = "0";
+                if (weaponButtons.length && activeLoader) {
+                    attachWeaponMode(activeLoader, weaponInterface
+                        && weaponInterface.dataset.defaultMode
+                        ? weaponInterface.dataset.defaultMode
+                        : "default");
+                }
+                var firstPanel = document.querySelector("[data-inspector-panel]");
+                if (firstPanel) {
+                    selectInspectorTab(firstPanel.dataset.inspectorPanel);
                 }
                 setMotionEnabled(true);
                 if (clipByName.idle) {
@@ -2876,41 +3999,69 @@
                 } else if (clipByName.room_idle_L) {
                     selectAction("room_idle_L");
                 }
+                // 动作选完之后再交回自动表情:selectAction 会把 faceFollowsAction
+                // 设回 true,但按钮的选中态要单独刷。
+                selectAutomaticFace();
             }
 
-            // 铺满窗口模式。
+            // 铺满窗口。
             //
-            // 观察台原本排在 topbar、hero、toolbar、status 之后，而 .models-browser
-            // 自身就有 clamp(760px, 88vh, 980px) 的高度，所以页面总高必然超出视口：
-            // 想操作右侧控制台就得先滚页面，而且面板下半截还是被裁掉的。
+            // 上一版是把观察台单独提成 position: fixed 的固定层。那样舞台和控制台
+            // 是一起可见了，但左边的素材列表被整张盖掉 —— 要换个模型必须先退出铺满，
+            // 也就是反馈里的「铺满窗口就不好选左边的条目了」。
             //
-            // 打开后把观察台提成占满视口的固定层，舞台和控制台一起完整可见，页面
-            // 滚动条不再参与操作；只有控制台内部在内容超长时自己滚。
-            var focusMode = false;
+            // 现在铺满的对象是整个工作台：搜索框、素材列表、舞台、控制台一起进全屏，
+            // 只是把 topbar 和浏览器界面让出来。列表始终在左边。用原生全屏 API，
+            // 所以退出方式（Esc、F11）和用户预期一致，不需要再自己维护一层状态。
+            var workbench = host.closest(".models-workbench");
+            function focusActive() {
+                return Boolean(document.fullscreenElement)
+                    && document.fullscreenElement === workbench;
+            }
+            function syncFocusButton() {
+                if (!focusButton) {
+                    return;
+                }
+                var on = focusActive();
+                focusButton.setAttribute("aria-pressed", String(on));
+                focusButton.innerHTML = on
+                    ? "<span aria-hidden='true'>✕</span> 退出铺满"
+                    : "<span aria-hidden='true'>⛶</span> 铺满窗口";
+                focusButton.title = on
+                    ? "退出铺满（F 或 Esc）"
+                    : "工作台铺满窗口，列表仍在左侧（F）";
+            }
             function setFocusMode(next) {
-                focusMode = !!next;
-                document.body.classList.toggle("model-focus-mode", focusMode);
-                var card = host.closest(".model-3d-card");
-                if (card) {
-                    card.classList.toggle("is-focus", focusMode);
+                if (!workbench) {
+                    return;
                 }
-                if (focusButton) {
-                    focusButton.setAttribute("aria-pressed", String(focusMode));
-                    focusButton.innerHTML = focusMode
-                        ? "<span aria-hidden='true'>✕</span> 退出铺满"
-                        : "<span aria-hidden='true'>⛶</span> 铺满窗口";
-                    focusButton.title = focusMode
-                        ? "退出铺满窗口（F 或 Esc）"
-                        : "铺满窗口，不用页面滚动条操作（F）";
+                var want = !!next;
+                if (want === focusActive()) {
+                    return;
                 }
+                var done = want
+                    ? (workbench.requestFullscreen ? workbench.requestFullscreen() : null)
+                    : (document.exitFullscreen ? document.exitFullscreen() : null);
+                if (done && typeof done.catch === "function") {
+                    // 全屏可能被浏览器策略拒绝（非用户手势等）。拒绝了就维持原状，
+                    // 不要留下一个和实际不符的按钮状态。
+                    done.catch(function () { syncFocusButton(); });
+                }
+            }
+            function onFullscreenChange() {
+                syncFocusButton();
                 // 容器尺寸变了，必须重算渲染缓冲，否则画面会被拉伸。
                 resize();
             }
+            document.addEventListener("fullscreenchange", onFullscreenChange);
+            syncFocusButton();
             if (focusButton) {
                 focusButton.addEventListener("click", function () {
-                    setFocusMode(!focusMode);
+                    setFocusMode(!focusActive());
                 });
             }
+            // 页签切回观察台时容器刚从 hidden 变回可见，尺寸要重算。
+            viewerResizeHook = resize;
 
             // 快捷键只在观察台可见、且焦点不在输入控件里时生效。
             function onViewerKeydown(event) {
@@ -2949,15 +4100,35 @@
                         break;
                     case "f":
                     case "F":
-                        setFocusMode(!focusMode);
+                        setFocusMode(!focusActive());
                         break;
-                    case "Escape":
-                        if (focusMode) {
-                            setFocusMode(false);
-                        } else {
-                            handled = false;
-                        }
+                    // [ / ] 收起、展开左边的素材列表。收起时舞台拿到那 310px 宽，
+                    // 而列表只是让位，不是消失 —— 边上留了一条竖把手。
+                    case "[":
+                    case "]":
+                        setListCollapsed(event.key === "[");
                         break;
+                    // 1-6 对应六个定点视角,顺序和面板上的按钮一致。
+                    case "1":
+                        selectViewPreset("front");
+                        break;
+                    case "2":
+                        selectViewPreset("left");
+                        break;
+                    case "3":
+                        selectViewPreset("right");
+                        break;
+                    case "4":
+                        selectViewPreset("back");
+                        break;
+                    case "5":
+                        selectViewPreset("top");
+                        break;
+                    case "6":
+                        selectViewPreset("bottom");
+                        break;
+                    // Esc 交给浏览器：原生全屏本来就用 Esc 退出，自己再处理一遍
+                    // 反而会和它抢。
                     default:
                         handled = false;
                 }
@@ -2966,35 +4137,26 @@
                 }
             }
             window.addEventListener("keydown", onViewerKeydown);
-            if (adjustButton && adjustDrawer) {
-                adjustButton.addEventListener("click", function () {
-                    var expanded = adjustButton.getAttribute("aria-expanded") !== "true";
-                    adjustButton.setAttribute("aria-expanded", String(expanded));
-                    adjustDrawer.hidden = !expanded;
+            viewPresetButtons.forEach(function (button) {
+                button.addEventListener("click", function () {
+                    selectViewPreset(button.dataset.viewPreset);
                 });
-            }
-            if (scaleRange) {
-                scaleRange.addEventListener("input", function () {
-                    if (!modelObject) {
-                        return;
-                    }
-                    var scale = Number(scaleRange.value) / 100;
-                    modelObject.scale.setScalar(scale);
-                    scaleValue.textContent = scaleRange.value + "%";
+            });
+            viewZoomButtons.forEach(function (button) {
+                button.addEventListener("click", function () {
+                    selectViewZoom(button.dataset.viewZoom);
                 });
-            }
-            if (verticalRange) {
-                verticalRange.addEventListener("input", function () {
-                    if (!modelObject) {
-                        return;
-                    }
-                    modelObject.position.y = Number(verticalRange.value) / 100 * modelHeight;
-                    if (modelKind === "enemy" && enemyMotionBasePosition) {
-                        enemyMotionBasePosition.y = modelObject.position.y;
-                    }
-                    verticalValue.textContent = verticalRange.value;
-                });
-            }
+            });
+            // 手动拖过之后取消定点视角的选中态,并让球坐标跟上,否则下一次点
+            // 「正面」会从一个陈旧角度插值,看起来像跳帧。
+            controls.addEventListener("end", syncViewFromCamera);
+            // 拖拽期间不要让缓动和 OrbitControls 抢镜头。
+            controls.addEventListener("start", function () {
+                viewTween = null;
+            });
+            renderer.domElement.addEventListener("dblclick", function () {
+                resetViewerState();
+            });
             faceButtons.forEach(function (button) {
                 button.addEventListener("click", function () {
                     selectFace(button.dataset.facePreset, false);
@@ -3038,8 +4200,20 @@
                     blinkActive = false;
                     nextBlinkAt = time + 2800;
                 }
+                stepViewTween(time);
                 controls.update();
-                renderer.render(scene, camera);
+                if (cinematic) {
+                    // 一条时钟。角色动作的时间由时间轴的帧数换算，不让 mixer
+                    // 自己走 —— 两套时钟一定会漂，而这段过场的相机切点是按帧
+                    // 卡在动作上的。
+                    if (motionEnabled) {
+                        cinematic.player.update(delta * playbackRate);
+                    }
+                    syncClipToCinematic();
+                    renderCinematicFrame();
+                } else {
+                    renderer.render(scene, camera);
+                }
                 animationFrame = window.requestAnimationFrame(renderFrame);
             }
             animationFrame = window.requestAnimationFrame(renderFrame);
@@ -3055,12 +4229,27 @@
                 disposed = true;
                 window.cancelAnimationFrame(animationFrame);
                 window.removeEventListener("keydown", onViewerKeydown);
-                // 铺满状态挂在 body 上，如果不清掉，切下一个模型时页面会卡在
-                // 一个没有观察台的铺满布局里，正文全部不可见。
-                document.body.classList.remove("model-focus-mode");
+                document.removeEventListener("fullscreenchange", onFullscreenChange);
+                viewerResizeHook = null;
+                // 全屏的对象是工作台，切模型时它一直在，所以不必退出全屏 ——
+                // 上一版铺满是挂在 body 上的一个 class，不清掉会让下一个模型停在
+                // 一个没有观察台的铺满布局里；现在没有这个状态了。
                 controls.dispose();
                 if (mixer) {
                     mixer.stopAllAction();
+                }
+                // 演出场景是独立下载的一整套网格和贴图（平均 24 KiB GLB，加上
+                // 共享贴图），切模型时必须跟着走，否则每看一次大招就漏一份。
+                if (cinematic) {
+                    var stale = cinematic;
+                    cinematic = null;
+                    scene.remove(stale.root);
+                    disposeObjectResources(stale.root);
+                }
+                if (shadowObject) {
+                    scene.remove(shadowObject);
+                    disposeObjectResources(shadowObject);
+                    shadowObject = null;
                 }
                 if (modelObject) {
                     clearMountedWeapon();
@@ -3196,6 +4385,93 @@
                 state.page = 1;
                 applyFilter();
             });
+        });
+        bindListCollapse();
+        bindAboutDrawer();
+    }
+
+    // 左侧素材列表的收起 / 展开。
+    // 收起只是把那 310px 让给舞台，列表位置上仍留一条竖把手，点它就回来。
+    // 记在 localStorage 里：这是「摆好一次就不想再摆」的偏好。
+    var LIST_COLLAPSE_KEY = "kirafan.models.listCollapsed";
+    function setListCollapsed(next) {
+        var browser = document.getElementById("modelsBrowser");
+        var rail = document.getElementById("modelsListRail");
+        var toggle = document.getElementById("modelsListCollapse");
+        if (!browser) {
+            return;
+        }
+        var on = !!next;
+        browser.classList.toggle("is-list-collapsed", on);
+        if (rail) {
+            rail.hidden = !on;
+        }
+        if (toggle) {
+            toggle.setAttribute("aria-expanded", String(!on));
+        }
+        try {
+            window.localStorage.setItem(LIST_COLLAPSE_KEY, on ? "1" : "0");
+        } catch (error) {
+            // 隐私模式下写不进去，不影响本次会话。
+        }
+        // 舞台宽度变了。
+        if (typeof viewerResizeHook === "function") {
+            viewerResizeHook();
+        }
+    }
+    function bindListCollapse() {
+        var rail = document.getElementById("modelsListRail");
+        var toggle = document.getElementById("modelsListCollapse");
+        if (toggle) {
+            toggle.addEventListener("click", function () {
+                var browser = document.getElementById("modelsBrowser");
+                setListCollapsed(!(browser && browser.classList.contains("is-list-collapsed")));
+            });
+        }
+        if (rail) {
+            rail.addEventListener("click", function () { setListCollapsed(false); });
+        }
+        var stored = null;
+        try {
+            stored = window.localStorage.getItem(LIST_COLLAPSE_KEY);
+        } catch (error) {
+            stored = null;
+        }
+        if (stored === "1") {
+            setListCollapsed(true);
+        }
+    }
+
+    // 「关于」抽屉。hero / about / footer 的文字原本排在观察台前后，把页面撑得
+    // 必然超出视口，于是浏览器滚动条一直在。文字没删，收进这里。
+    function bindAboutDrawer() {
+        var toggle = document.getElementById("modelsAboutToggle");
+        var drawer = document.getElementById("modelsAboutDrawer");
+        var close = document.getElementById("modelsAboutClose");
+        if (!toggle || !drawer) {
+            return;
+        }
+        function setOpen(open) {
+            drawer.hidden = !open;
+            toggle.setAttribute("aria-expanded", String(open));
+            if (open && close) {
+                close.focus();
+            }
+        }
+        toggle.addEventListener("click", function () { setOpen(drawer.hidden); });
+        if (close) {
+            close.addEventListener("click", function () { setOpen(false); });
+        }
+        // 点遮罩关闭；面板自己的点击不算。
+        drawer.addEventListener("click", function (event) {
+            if (event.target === drawer) {
+                setOpen(false);
+            }
+        });
+        document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape" && !drawer.hidden) {
+                setOpen(false);
+            }
         });
     }
 
