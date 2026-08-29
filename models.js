@@ -123,10 +123,23 @@
         return fringeModule;
     }
     var fringeHelpers = null;
-    // ?nofringe=1 关掉修复，用来做前后对照量黑边 —— 不留这个开关就只能靠
-    // 改代码再刷新，两次的相机和姿势对不齐，量出来的差值没有意义。
+    // 默认关掉。开关留着（?fringe=1 打开，?nofringe=1 强制关掉），因为要靠它
+    // 做前后对照 —— 改代码再刷新的话两次的相机和姿势对不齐，量出来的差值没有
+    // 意义。
+    //
+    // 为什么默认关：判定线只看 alpha，而这批素材里 alpha 低的地方不一定是合成
+    // 痕迹。alphaFloor 0.98 在 m_Model_EN_7000 上把 51.35% 的着墨像素判成可写，
+    // 一张图集的柔边不可能占一半，被刷掉的是画师自己画的半透明（蕾丝、纱、
+    // 扇面）。同一帧同一机位量下来，开修复之后头部区域的梯度能量只剩不开的
+    // 40.2%，也就是细节掉了六成 —— 这正是反馈里说的「更加粗糙」。
+    //
+    // 试过按「离图集空白多远」来区分痕迹和画（痕迹一定贴着空白，成片的半透明
+    // 不贴），d2 能保住 98.6% 的细节但黑边基本没动，d4 之后黑边下去了细节也跟着
+    // 掉到 57.6%。这条界线目前分不开这两样东西，所以先不开；黑边该怎么修还没
+    // 定论，见下面 alphaTest 那一段。
     var FRINGE_QUERY = new URLSearchParams(window.location.search);
-    var FRINGE_DISABLED = FRINGE_QUERY.get("nofringe") === "1";
+    var FRINGE_DISABLED = FRINGE_QUERY.get("fringe") !== "1"
+        || FRINGE_QUERY.get("nofringe") === "1";
     // ?fringefloor=0.5 改判定线，用来扫参数。斜坡里 alpha 高的那一段可能是
     // 画师真画的柔和过渡，不是合成留下的痕迹，判定线定在哪里得量出来。
     var FRINGE_FLOOR = Number(FRINGE_QUERY.get("fringefloor"));
@@ -142,6 +155,14 @@
     var FRINGE_PASSES = Number(FRINGE_QUERY.get("fringepasses"));
     if (Number.isFinite(FRINGE_PASSES) && FRINGE_PASSES > 0) {
         FRINGE_OPTIONS.passes = FRINGE_PASSES;
+    }
+    // ?fringedist=3 改「离空白多远还算合成痕迹」这条界线，0 表示不限制（也就是
+    // 旧行为）。判定线只看 alpha 的时候会把画师真画的半透明（蕾丝、纱、扇面）
+    // 当成痕迹一起刷掉 —— model_en_7000 的主图集有 51% 的着墨像素被判成可写，
+    // 细节因此掉了一半。这个参数是用来扫那条界线的。
+    var FRINGE_DIST = Number(FRINGE_QUERY.get("fringedist"));
+    if (Number.isFinite(FRINGE_DIST) && FRINGE_DIST >= 0) {
+        FRINGE_OPTIONS.emptyDistance = FRINGE_DIST;
     }
     // 预热：模型解析完就要用，等到那时候再 await 一个网络请求会让第一帧
     // 先用没修的贴图画出来再跳变。
