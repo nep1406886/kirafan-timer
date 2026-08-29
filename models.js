@@ -123,27 +123,39 @@
         return fringeModule;
     }
     var fringeHelpers = null;
-    // 默认关掉。开关留着（?fringe=1 打开，?nofringe=1 强制关掉），因为要靠它
-    // 做前后对照 —— 改代码再刷新的话两次的相机和姿势对不齐，量出来的差值没有
-    // 意义。
+    // 默认开，但只开很窄的一档：alphaFloor 0.60 + emptyDistance 2 + 只提亮。
+    // ?nofringe=1 强制关掉，参数仍然可以从 URL 扫（下面几个开关）。
     //
-    // 为什么默认关：判定线只看 alpha，而这批素材里 alpha 低的地方不一定是合成
-    // 痕迹。alphaFloor 0.98 在 m_Model_EN_7000 上把 51.35% 的着墨像素判成可写，
-    // 一张图集的柔边不可能占一半，被刷掉的是画师自己画的半透明（蕾丝、纱、
-    // 扇面）。同一帧同一机位量下来，开修复之后头部区域的梯度能量只剩不开的
-    // 40.2%，也就是细节掉了六成 —— 这正是反馈里说的「更加粗糙」。
+    // 之前默认是关的，原因是判定线只看 alpha：alphaFloor 0.98 在
+    // m_Model_EN_7000 上把 51.35% 的着墨像素判成可写，一张图集的柔边不可能占
+    // 一半，被刷掉的是画师自己画的半透明（蕾丝、纱、扇面）。那个版本头部梯度
+    // 能量只剩 40.2%，正是反馈里说的「更加粗糙」。这次重新量，同一台机器同一
+    // 个姿势（超采样 3x3 再降采样当收敛基准）：
+    //   model_en_7000 idle       边缘亮度  很暗的纹素   头部细节   MAE
+    //     关                       12.69     5531        100%      2.61
+    //     0.98 无 dist            100.60     2065         62%      1.86
+    //     0.60 + dist2 提亮        33.41     3642         95%      2.46
+    //   model_pl_130008 battle_run
+    //     关                       49.06     2124        100%      1.82
+    //     0.60 + dist2 提亮        53.86     1939         95%      1.79
+    // 也就是说加上距离闸门之后，黑边在敌人身上轻了 2.6 倍、很暗的纹素少了三分
+    // 之一，细节还留着 95%（之前那版是 62%），欠采样误差也顺带小了一点。玩家
+    // 模型的图集大、本来就没什么黑边，所以那边基本不动 —— 这正好是想要的：
+    // 该修的地方修，不该动的地方不动。
     //
-    // 试过按「离图集空白多远」来区分痕迹和画（痕迹一定贴着空白，成片的半透明
-    // 不贴），d2 能保住 98.6% 的细节但黑边基本没动，d4 之后黑边下去了细节也跟着
-    // 掉到 57.6%。这条界线目前分不开这两样东西，所以先不开；黑边该怎么修还没
-    // 定论，见下面 alphaTest 那一段。
+    // 为什么距离闸门这次有用。之前也试过「离图集空白多远」这条线，记下来的结论
+    // 是 d2 保住 98.6% 细节但黑边基本没动。差别多半在超出范围的斜坡纹素怎么算：
+    // 这里把它们算成 trusted，颜色可以从它们身上继续往外传，所以修复够得着最
+    // 外面那圈；如果只是「不可写」，颜色的推进就被挡在里面，边上自然一点没变。
+    // 那份实现不在仓库里（模块根本没读过 emptyDistance，?fringedist= 从 0 到 3
+    // 渲出来一模一样），没法直接比对，只能说明现在这版是量过的。
     var FRINGE_QUERY = new URLSearchParams(window.location.search);
-    var FRINGE_DISABLED = FRINGE_QUERY.get("fringe") !== "1"
-        || FRINGE_QUERY.get("nofringe") === "1";
+    var FRINGE_DISABLED = FRINGE_QUERY.get("nofringe") === "1";
     // ?fringefloor=0.5 改判定线，用来扫参数。斜坡里 alpha 高的那一段可能是
     // 画师真画的柔和过渡，不是合成留下的痕迹，判定线定在哪里得量出来。
     var FRINGE_FLOOR = Number(FRINGE_QUERY.get("fringefloor"));
-    var FRINGE_OPTIONS = {};
+    // 默认值就是量出来最好的那一档，URL 参数只用来复现和继续扫。
+    var FRINGE_OPTIONS = { alphaFloor: 0.6, emptyDistance: 2 };
     if (Number.isFinite(FRINGE_FLOOR) && FRINGE_FLOOR > 0) {
         FRINGE_OPTIONS.alphaFloor = FRINGE_FLOOR;
     }
@@ -160,9 +172,17 @@
     // 旧行为）。判定线只看 alpha 的时候会把画师真画的半透明（蕾丝、纱、扇面）
     // 当成痕迹一起刷掉 —— model_en_7000 的主图集有 51% 的着墨像素被判成可写，
     // 细节因此掉了一半。这个参数是用来扫那条界线的。
-    var FRINGE_DIST = Number(FRINGE_QUERY.get("fringedist"));
-    if (Number.isFinite(FRINGE_DIST) && FRINGE_DIST >= 0) {
-        FRINGE_OPTIONS.emptyDistance = FRINGE_DIST;
+    // ?fringedist=0 表示不限制（旧行为），默认是 2 —— 见上面那张表。
+    // 这里必须先判 null 再转数字：参数没写的时候 get() 返回 null，而
+    // Number(null) 是 0 不是 NaN，会通过 >= 0 这道判断，把默认的 2 覆盖成
+    // 0 —— 也就是不限制。之前所有不带 fringedist 的运行拿到的都是没有门限
+    // 的那版（量出来边缘亮度 106、细节只剩 73%），正是被否掉的那一档。
+    var FRINGE_DIST_RAW = FRINGE_QUERY.get("fringedist");
+    if (FRINGE_DIST_RAW !== null) {
+        var FRINGE_DIST = Number(FRINGE_DIST_RAW);
+        if (Number.isFinite(FRINGE_DIST) && FRINGE_DIST >= 0) {
+            FRINGE_OPTIONS.emptyDistance = FRINGE_DIST;
+        }
     }
     // 预热：模型解析完就要用，等到那时候再 await 一个网络请求会让第一帧
     // 先用没修的贴图画出来再跳变。
@@ -876,8 +896,16 @@
         return 0;
     }
 
-    // 抗锯齿这条路已经量到底了,结论是现状(alpha-to-coverage)就是对的,
-    // 不要再改。留下这段是因为三个看起来很有道理的方案都被数据否掉了:
+    // 抗锯齿。下面 1、2、3 三条仍然成立(都被数据否掉了),但当时"现状
+    // alpha-to-coverage 就是对的"这个结论已经被推翻 —— a2c 现在是关的,
+    // 原因写在 applyMaterialRules 里那段测量旁边。简单说:第 3 条的交叉
+    // 比对方法是对的,但它只比了"混合 vs a2c",没有比"a2c vs 什么都不加"。
+    // 4 采样的覆盖率只有 5 档,比图集 alpha 的 8 bit 粗,所以 a2c 是在给
+    // 边缘加量化噪声;把它关掉之后,同一个姿势的欠采样误差从 MAE 3.43 掉到
+    // 2.61,而两种模式收敛之后的图是同一张(亮度 MAE 0.23、剪影 MAE
+    // 0.0020),不存在第 3 条那种"画的不是同一张图"的问题。
+    //
+    // 留下这三条是因为它们看起来很有道理却都是错的:
     //
     // 1. 提高 pixelRatio。1/2/3/4/6 倍下锯齿指标 0.2307/0.2345/0.2294/
     //    0.2308/0.2290,完全不动。
@@ -888,7 +916,18 @@
     //    纹素方格走的方式,依旧是台阶。那条双线性斜坡本身就是这些图集自带
     //    的抗锯齿,轮廓的亚像素位置全写在它的灰阶里,动它就是在删信息。
     // 3. 换成真正的 alpha 混合(8 bit,而 4 采样的 coverage 只有 5 档)。
-    //    这个一开始量出来是赢的,但那是把混合的结果拿混合自己的超采样版当
+    //    这条的结论还是"不采纳",但理由要换一个:后来把混合改成留在不透明
+    //    队列里(transparent=false + CustomBlending,画的顺序还是游戏自己的
+    //    m_HieIndex),下面那个"两份基准 5% 像素不一致"的毛病就没有了,欠采
+    //    样误差也确实最低(MAE 1.60,差 >40 的只剩 9 个像素)。真正挡住它的
+    //    是别的:混合会把画师画在表面内部的 alpha<1 也当成半透明,
+    //    model_pl_130008 内部实心的像素从 97.7% 掉到 86.7%,en_7000 从
+    //    86.9% 掉到 72.9%。游戏写的是不透明,这就是把不该透的地方画透了。
+    //    (它顺带把边缘那圈的暗边压得很轻 —— 覆盖率 0.575→0.171、亮度
+    //    12.6→6.0 —— 说明"黑边重"的成因是低 alpha 的暗纹素被按 25% 的
+    //    coverage 下限画了出来。要治那个得从贴图下手,不是改混合模式。)
+    //
+    //    一开始量出来是赢的那次不算,那是把混合的结果拿混合自己的超采样版当
     //    基准 —— 循环论证。改成交叉比对(两种模式各出一份 4 倍超采样基准)
     //    之后:
     //      model_en_7000    1x 覆盖率 vs coverage@4x  0.2652
@@ -954,6 +993,8 @@
             // 大招 GLB 只下载一次，无论用户点哪一段。
             var skillClipsRequested = false;
             var skillLoader = null;
+            // 每个职业单独记：点了魔法师不该把僧侣那套也算成已取。
+            var extensionClassesRequested = {};
             // とっておき 演出（背景 + 特效 + 过场相机）。
             //
             // cinematic 为 null 表示当前在普通观察模式：镜头是那台透视相机，
@@ -1532,8 +1573,35 @@
                 abnormal: "异常状态"
             };
 
+            // 借来的职业动作。名字必须和角色自带的那份区分开：clipByName、
+            // 表情表、可见性表全都拿动作名当键，直接叫 attack 会和本职业的
+            // attack 撞车，先到的那份赢。前缀留 ext_<职业号>_，两边就都在。
+            var CLASS_NAMES = ["fighter", "magician", "priest", "knight", "alchemist"];
+            var CLASS_LABELS = ["战士", "魔法师", "僧侣", "骑士", "炼金术士"];
+            var EXTENSION_PREFIX = /^ext_(\d)_(.+)$/;
+            // 目录里每套职业动作都是这五个（manifest.classActions 全部 20 项一致），
+            // 用来在还没下载的时候挂占位按钮。
+            var CLASS_ACTION_NAMES = ["idle", "attack", "class_skill_1", "class_skill_2", "class_skill_3"];
+
+            function extensionActionOf(name) {
+                var match = name && EXTENSION_PREFIX.exec(name);
+                if (!match) {
+                    return null;
+                }
+                return { classId: Number(match[1]), base: match[2] };
+            }
+
+            // 表情表、可见性表、敌人状态表都是按游戏里的原始动作名建的，借来的
+            // 那份查表要用原名。职业差异由各自的表项负责，不在这里区分。
+            function baseActionOf(name) {
+                var extension = extensionActionOf(name);
+                return extension ? extension.base : name;
+            }
+
             function friendlyActionName(name) {
-                return ACTION_LABELS[name] || name.replace(/_/g, " ");
+                // 借来的动作不再把职业名塞进按钮：它所在那组的标题就是职业名，
+                // 分组的 aria-label 也是，重复一遍只会把两列的按钮挤到换行。
+                return ACTION_LABELS[baseActionOf(name)] || name.replace(/_/g, " ");
             }
 
             // 分组顺序即渲染顺序。大招单独一组并置顶，因为那是用户最想看的一段，
@@ -1545,7 +1613,35 @@
                 { key: "state", label: "状态", note: "受击与异常", names: ["damage", "abnormal", "dead"] }
             ];
 
+            // 借来的那些自成一组，不然本职业的 attack 和另外四份 attack 会挤在
+            // 同一排，谁是这个角色真正会用的看不出来。而且一个职业一组，不是
+            // 二十个挤成一组：宽屏下分组是两列布局，二十个按钮排成十行会把那
+            // 一格拉得比其余所有组加起来还高。
+            function extensionGroupsFor(names) {
+                var seen = {};
+                names.forEach(function (name) {
+                    var extension = extensionActionOf(name);
+                    if (extension) {
+                        seen[extension.classId] = true;
+                    }
+                });
+                return Object.keys(seen).sort().map(function (classId) {
+                    return {
+                        key: "extension_" + classId,
+                        label: CLASS_LABELS[classId] || CLASS_NAMES[classId] || ("职业 " + classId),
+                        note: "借用的职业动作",
+                        names: CLASS_ACTION_NAMES.map(function (base) {
+                            return "ext_" + classId + "_" + base;
+                        })
+                    };
+                });
+            }
+
             function actionGroupOf(name) {
+                var extension = extensionActionOf(name);
+                if (extension) {
+                    return "extension_" + extension.classId;
+                }
                 for (var i = 0; i < ACTION_GROUPS.length; i++) {
                     if (ACTION_GROUPS[i].names.indexOf(name) >= 0) {
                         return ACTION_GROUPS[i].key;
@@ -1585,6 +1681,20 @@
                         }
                     });
                 }
+                // 扩展动作同理：一个职业一套，点了才下载。占位按钮按目录里那套
+                // 的固定五个动作名挂，取回来之后名字会一一对上。
+                extensionClassIds().forEach(function (classId) {
+                    if (extensionClassesRequested[classId]) {
+                        return;
+                    }
+                    CLASS_ACTION_NAMES.forEach(function (base) {
+                        var name = "ext_" + classId + "_" + base;
+                        if (!clipByName[name]) {
+                            pending[name] = "extension";
+                            displayClips.push({ name: name });
+                        }
+                    });
+                });
                 // ★3 never had a とっておき, but a skill.glb.gz was published for
                 // some of them anyway, so the catalog would happily offer one.
                 // Drop the ultimate group for anyone the rarity table says has
@@ -1605,7 +1715,11 @@
                     var key = actionGroupOf(clip.name);
                     (byGroup[key] = byGroup[key] || []).push(clip);
                 });
-                var groups = ACTION_GROUPS.concat([{ key: "other", label: "其它", note: "包内其余片段", names: [] }]);
+                var groups = ACTION_GROUPS
+                    .concat(extensionGroupsFor(displayClips.map(function (clip) {
+                        return clip.name;
+                    })))
+                    .concat([{ key: "other", label: "其它", note: "包内其余片段", names: [] }]);
                 groups.forEach(function (group) {
                     var groupClips = byGroup[group.key];
                     if (!groupClips || !groupClips.length) {
@@ -1656,11 +1770,17 @@
                         button.innerHTML = escapeHtml(friendlyActionName(clip.name)) + "<small>" + escapeHtml(clip.name) + "</small>";
                         if (pending[clip.name]) {
                             button.classList.add("is-pending");
-                            button.title = "首次播放需要下载这段演出";
+                            button.title = pending[clip.name] === "extension"
+                                ? "首次播放需要下载这个职业的动作"
+                                : "首次播放需要下载这段演出";
                         }
                         button.addEventListener("click", function () {
                             actionChosenByUser = true;
                             setMotionEnabled(true);
+                            if (pending[clip.name] === "extension") {
+                                requestExtensionClips(clip.name, button);
+                                return;
+                            }
                             if (pending[clip.name]) {
                                 requestSkillClips(clip.name, button);
                                 return;
@@ -1708,6 +1828,50 @@
                         button.classList.remove("is-loading");
                         button.disabled = false;
                         skillClipsRequested = false;
+                    }
+                });
+            }
+
+            // 和 requestSkillClips 同样的形状，但按职业记账：一次只取被点中那套。
+            function requestExtensionClips(wanted, button) {
+                var extension = extensionActionOf(wanted);
+                if (!extension || extensionClassesRequested[extension.classId]) {
+                    return;
+                }
+                var classId = extension.classId;
+                extensionClassesRequested[classId] = true;
+                button.classList.add("is-loading");
+                button.disabled = true;
+                loadExtensionClassClips(skillLoader, classId).then(function (clips) {
+                    if (disposed) {
+                        return;
+                    }
+                    // 一套都没取到就把按钮放回去，不然界面留着五个永远点不动的键。
+                    if (!clips.length) {
+                        extensionClassesRequested[classId] = false;
+                        button.classList.remove("is-loading");
+                        button.disabled = false;
+                        return;
+                    }
+                    var merged = [];
+                    clips.forEach(function (clip) {
+                        if (!clipByName[clip.name]) {
+                            clipByName[clip.name] = clip;
+                        }
+                    });
+                    Object.keys(clipByName).forEach(function (name) {
+                        merged.push(clipByName[name]);
+                    });
+                    activeAction = clipByName[wanted] ? wanted : activeAction;
+                    mountActionControls(merged);
+                    if (clipByName[wanted]) {
+                        selectAction(wanted);
+                    }
+                }).catch(function () {
+                    if (!disposed) {
+                        extensionClassesRequested[classId] = false;
+                        button.classList.remove("is-loading");
+                        button.disabled = false;
                     }
                 });
             }
@@ -2066,13 +2230,18 @@
                 // five classes but pose them differently, so the class table wins
                 // where it has an entry.
                 var byClass = VISIBILITY_TABLE.classClips || {};
-                var classTable = metadata && Number.isFinite(metadata.class)
-                    ? byClass[String(metadata.class)]
-                    : null;
-                if (classTable && classTable[clipName]) {
-                    return classTable[clipName];
+                // 借来的动作要查它本来那个职业的表：魔法师的 attack 和战士的
+                // attack 同名不同姿，用本职业的表会切错袖子和武器层。
+                var extension = extensionActionOf(clipName);
+                var classId = extension
+                    ? extension.classId
+                    : (metadata && Number.isFinite(metadata.class) ? metadata.class : null);
+                var baseName = extension ? extension.base : clipName;
+                var classTable = classId === null ? null : byClass[String(classId)];
+                if (classTable && classTable[baseName]) {
+                    return classTable[baseName];
                 }
-                return VISIBILITY_TABLE.clips[clipName] || null;
+                return VISIBILITY_TABLE.clips[baseName] || null;
             }
 
             function visibilityValueAt(track, frame) {
@@ -2653,7 +2822,7 @@
             // The face an action asks for on frame 0, used when the action is
             // selected and whenever "跟随动作" is pressed.
             function facialStateForAction(action) {
-                var events = facialActions && facialActions[action];
+                var events = facialActions && facialActions[baseActionOf(action)];
                 if (!events || !events.length) {
                     return -1;
                 }
@@ -2666,7 +2835,7 @@
             // until frame 7 and the winning face after it, so restoring the
             // frame-0 face would undo the win.
             function facialWantedState() {
-                var events = facialActions && facialActions[activeAction];
+                var events = facialActions && facialActions[baseActionOf(activeAction)];
                 if (!events || !events.length) {
                     return facialTable ? facialTable["default"] : -1;
                 }
@@ -2679,7 +2848,9 @@
             // runs it on a timer of its own, moving between the open and closed
             // halves of FACIAL_ID_BLINK. It may only interrupt a resting face, so
             // a move that asked for a specific expression keeps it.
-            function updateFacialBlink(time) {
+            // timeRunning 缺省当成 true：window.__facialStep 只传一个参数，
+            // tools 里那套表情检查靠它驱动眨眼，收紧参数会让那些检查再也眨不了眼。
+            function updateFacialBlink(time, timeRunning) {
                 if (!facialTable) {
                     return;
                 }
@@ -2687,7 +2858,14 @@
                 // changes what is on screen, so testing that would make the face
                 // stop resting the instant it blinked and leave the eye shut.
                 var wanted = facialWantedState();
-                var canBlink = faceFollowsAction
+                // 眨眼走的是 performance.now()，跟动作时钟无关，所以暂停按钮按下去
+                // 之后它照旧在眨。实测停在一帧上不动，眼睛仍然 L30_eye_A →
+                // L30_eye_G → L30_eye_A 地换，头部有 2200 像素在变 —— 用户看到的
+                // 「有些模型渲染出来还是有闪烁」有一部分就是这个，而且它让所有按
+                // 帧比对的测量都失效：眨眼落在两次抓帧之间，看上去和深度打架一模
+                // 一样。冻住眨眼之后同一批 pose 真正的争用像素只剩 18~44 个。
+                var canBlink = timeRunning !== false
+                    && faceFollowsAction
                     && wanted === facialTable["default"]
                     && facialTable.blink >= 0
                     && facialTable.blink !== facialTable["default"];
@@ -2725,7 +2903,7 @@
                 if (!facialTable || !faceFollowsAction || !activeClipAction) {
                     return;
                 }
-                var events = facialActions && facialActions[activeAction];
+                var events = facialActions && facialActions[baseActionOf(activeAction)];
                 if (!events || !events.length) {
                     return;
                 }
@@ -3096,7 +3274,12 @@
                                             child.material.transparent = false;
                                             child.material.alphaTest = 0.015;
                                             child.material.depthWrite = true;
-                                            child.material.alphaToCoverage = true;
+                                            // 跟角色材质一样关掉 a2c:4 采样的
+                                            // 覆盖率只有 5 档,给边缘加的是量化
+                                            // 噪声。武器尤其明显 —— en_7000 的
+                                            // weapon_obj 一直是欠采样误差最大的
+                                            // 那个网格。
+                                            child.material.alphaToCoverage = false;
                                             child.material.depthTest = true;
                                             // Weapons carry a cartoon outline as an
                                             // inverted hull: a scaled-up shell whose
@@ -3141,6 +3324,44 @@
                 var source = CLASS_ACTION_PREVIEWS[String(metadata.class) + ":" + headId]
                     || CLASS_ACTION_PREVIEWS[String(metadata.class) + ":0"];
                 return loadRetargetedClips(loader, source, "职业动作");
+            }
+
+            // 扩展动作：把另外四个职业的那套 idle/attack/class_skill_1..3 借到
+            // 当前角色身上。都是游戏自己的动作，不是编出来的，retarget 走的也是
+            // 职业动作本来就在用的 loadRetargetedClips —— 差别只是平时只取本
+            // 职业那一份。headId 保持不变，它选的是体型，换了会错骨长。
+            //
+            // 一套约 320 KiB，四套 1.3 MiB，比模型本体还大，所以和大招一样按需
+            // 取：先挂占位按钮，点了才下载那一个职业。
+            function extensionClassIds() {
+                if (modelKind !== "player" || !metadata || !Number.isFinite(metadata.class)) {
+                    return [];
+                }
+                var headId = Number.isFinite(metadata.headId) ? metadata.headId : 0;
+                return CLASS_NAMES.map(function (unused, classId) {
+                    return classId;
+                }).filter(function (classId) {
+                    if (classId === metadata.class) {
+                        return false;
+                    }
+                    return Boolean(CLASS_ACTION_PREVIEWS[String(classId) + ":" + headId]
+                        || CLASS_ACTION_PREVIEWS[String(classId) + ":0"]);
+                });
+            }
+
+            function loadExtensionClassClips(loader, classId) {
+                var headId = metadata && Number.isFinite(metadata.headId) ? metadata.headId : 0;
+                var source = CLASS_ACTION_PREVIEWS[String(classId) + ":" + headId]
+                    || CLASS_ACTION_PREVIEWS[String(classId) + ":0"];
+                return loadRetargetedClips(loader, source, "扩展动作").then(function (clips) {
+                    return clips.map(function (clip) {
+                        // 改名而不是丢掉重名的那份：本职业的 attack 要留在战斗组里。
+                        // loadRetargetedClips 每次都新建 AnimationClip，没有别处
+                        // 引用，就地改名即可，不必再复制一份轨道。
+                        clip.name = "ext_" + classId + "_" + clip.name;
+                        return clip;
+                    });
+                });
             }
 
             function loadEnemyBaseClips(loader) {
@@ -3201,6 +3422,20 @@
                     // 目录已经挂好了才探到,就地补上开关,不重建整条动作条。
                     if (actionStrip && actionStrip.children.length) {
                         mountActionControls(currentClipList());
+                    }
+                    // 这个探测是异步的（要先取场景目录），而 selectAction 只在
+                    // cinematicAvailable 已经为真的时候才上演出。目录还在路上
+                    // 的时候点大招，就只播一条光秃秃的动作：没有背景、没有作品
+                    // 自己那台相机，而且开关随后还是会冒出来 —— 于是界面在说
+                    // 「这个角色有演出」，实际却没挂。谁都不会再重试一次。
+                    // 量出来的现象（.codex-tmp/cine_race.py，model_pl_100206）：
+                    //   先等开关出现再点  -> 演出挂上
+                    //   一出现大招就点    -> 15 秒后仍然没有演出，开关却在
+                    // 所以探测落地的时候回头看一眼：要是用户已经站在大招上了，
+                    // 就把演出补挂上。
+                    if (cinematicWanted && !cinematic
+                        && actionGroupOf(activeAction) === "ultimate") {
+                        enterCinematic();
                     }
                 }).catch(function () { /* 没有演出就沉默降级 */ });
             }
@@ -3654,24 +3889,56 @@
                             // Meshes stay double-sided because mirrored left/right
                             // pieces do not share a reliable GLB winding direction.
                             var blended = /_outline$/i.test(child.material.name || "");
-                            child.material.transparent = blended;
-                            child.material.alphaTest = blended ? 0 : 0.01;
-                            child.material.depthWrite = !blended
-                                && preview.depthWrite !== false;
-                            child.material.depthTest = true;
-                            // 一个 alpha test 只能"保留或丢弃"，而 discard 不是
-                            // MSAA 能平均的东西，所以不管开多少采样，被 alpha
-                            // test 切出来的边缘一律是锯齿。头发丝、扇骨这种只有
-                            // 一两个纹素宽的结构最明显。
+                            // 五官的贴花材质是下面那段克隆出来的，会被缓存复用。
+                            // 换表情或重新遍历时 child.material 已经是那份克隆，
+                            // 这套通用规则会把它的 depthWrite 重新打开，于是修好
+                            // 的刘海遮挡又坏回去。认出贴花就跳过。
+                            var isDecal = Boolean(child.material.userData
+                                && child.material.userData.faceDecal);
+                            if (!isDecal) {
+                                child.material.transparent = blended;
+                                child.material.alphaTest = blended ? 0 : 0.01;
+                                child.material.depthWrite = !blended
+                                    && preview.depthWrite !== false;
+                                child.material.depthTest = true;
+                            }
+                            // alpha-to-coverage 关掉。它本来是想解决"alpha test
+                            // 只能保留或丢弃、切出来的边一律是锯齿"，做法是把
+                            // 贴图 alpha 转成 MSAA 覆盖率。问题是这块画布只有 4
+                            // 个采样，覆盖率因此只有 0/25/50/75/100 五档，比画师
+                            // 画在 alpha 里的 8 bit 渐变粗得多，于是它不是在平滑
+                            // 边缘，而是在给边缘加量化噪声。
                             //
-                            // alpha-to-coverage 把贴图的 alpha 转成 MSAA 覆盖率，
-                            // 让这些边交给已经在平滑几何边缘的多重采样缓冲去解算。
-                            // 材质仍然是不透明并继续写深度，所以上面那套队列顺序
-                            // 和接缝修复完全不受影响。
+                            // 量的办法是"同一个姿势渲两次"：一次按出货的采样率，
+                            // 一次 3x3 超采样再框式降采样到同一张网格上。后者是
+                            // 这个模式收敛之后的正确答案，两者的差就是欠采样，而
+                            // 欠采样就是动起来会闪的那些像素。model_en_7000 的
+                            // idle：
+                            //   a2c 开   MAE 3.43   差 >12 的 5.61%   >40 的 1208
+                            //   a2c 关   MAE 2.61   差 >12 的 4.57%   >40 的  383
+                            // model_pl_130008 的 battle_run 是 2.64 → 1.82，
+                            // >40 从 960 到 574。误差压在头发和脚上（头部占
+                            // 43~51%，腿脚 20~22%），正是"头发和脚闪"报的位置。
                             //
-                            // 试过换成真正的 alpha 混合,交叉比对之后是退步,
-                            // 见上面 mount3DModel 前的那段。
-                            child.material.alphaToCoverage = !blended;
+                            // 关掉不会换掉画面：两种模式各自收敛之后的图是同一张
+                            // 图 —— en_7000 亮度 MAE 0.23、只有 0.49% 的像素差超
+                            // 过 12，剪影 MAE 0.0020；表面内部的实心度
+                            // （0.9054 对 0.9046）和边缘那圈的覆盖率
+                            // （0.582 对 0.575）都在噪声里。也就是说 a2c 的量化
+                            // 在高采样下会平均掉，它在 1x 下的全部效果就是噪声。
+                            // 拿 a2c 自己的超采样版当基准（避免自证）也是关掉赢：
+                            // 2.71 对 3.43。
+                            //
+                            // 真正的 alpha 混合还要更平（MAE 1.60、>40 只剩 9），
+                            // 但它会把画师画在表面内部的 alpha<1 也当成半透明：
+                            // pl_130008 内部实心的像素从 97.7% 掉到 86.7%。游戏
+                            // 自己写的是 _Mode=0 / _SrcBlend=One / _DstBlend=Zero
+                            // / _ZWrite=1，不透明才是原意，所以不采纳。
+                            // alphaTest 提到 0.5 也不行：边缘那圈的亮度从 12.7
+                            // 跳到 100.9，剪影还少掉 8200 个像素的细结构。
+                            if (!isDecal) {
+                                child.material.alphaToCoverage = false;
+                            }
                             child.material.userData.edgeBlended = true;
                             // 五官是例外，必须按 alpha 混合画。
                             //
@@ -3698,7 +3965,28 @@
                             // 东西该出现在它们背后。
                             //
                             // alphaTest 留一点点：alpha 为 0 的纹素还是要 discard，
-                            // 否则它们照样写深度，会挡住后面该画的东西。
+                            // 省掉一次无用的混合。
+                            //
+                            // depthWrite 必须关掉。上面那句「本来也没有东西该出现
+                            // 在它们背后」是错的，实测把可见网格按 renderOrder 排
+                            // 出来，刘海就画在五官之后：
+                            //   model_en_7000  eye 29036 / mouth 29041
+                            //                  → hair_side_R 35059, hair_L 36060,
+                            //                    hair_R 37061, hair_C 38062
+                            //   model_pl_130008 mouth 86137 / eye 105124 /
+                            //                  eyebrrow 110119
+                            //                  → hair_C_A 89150, hair_C_C 89152,
+                            //                    hair_C_B 92151, hair_back_L 105154,
+                            //                    hair_accessories 110156
+                            // 五官是一整块矩形，眼睛嘴巴以外 alpha 近乎 0，这些纹素
+                            // 看不见却照样把深度写在五官那一层。之后画的刘海只要贴
+                            // 近这一层，就会被这块隐形的深度按 pose 逐帧地挡掉一部
+                            // 分 —— 这同时是「头发闪烁」、「刘海边缘突兀」和之前那
+                            // 条「眼睛渲染在头发上面」。
+                            //
+                            // 贴花不写深度是它本来的语义，游戏自己的半透明材质也是
+                            // _ZWrite=0。depthTest 保留：画在五官之前的后脑头发照旧
+                            // 能挡住它们。
                             if (FACE_PART_NAME.test(child.name || "")) {
                                 var decal = faceDecalMaterials.get(child.material);
                                 if (!decal) {
@@ -3713,6 +4001,22 @@
                                     decal.blendDstAlpha = THREE.OneMinusSrcAlphaFactor;
                                     decal.alphaToCoverage = false;
                                     decal.alphaTest = 0.004;
+                                    decal.depthWrite = false;
+                                    decal.depthTest = true;
+                                    // 这里不加 polygonOffset。曾经加过 -1，因为一
+                                    // 组测量说它能把「深度精度扰动下变色的像素」从
+                                    // 1636 降到 666。那组数全是假的：眨眼跑在
+                                    // performance.now() 上，暂停也照眨，一次眨眼换
+                                    // 掉头部 2200 个像素，恰好落在两次抓帧之间就和
+                                    // 深度打架长得一模一样。把眨眼冻住之后同样 28 个
+                                    // pose 重新量：
+                                    //   dw=1 off= 0   42
+                                    //   dw=0 off= 0   27
+                                    //   dw=0 off=-1   47
+                                    //   dw=0 off=-2   23
+                                    // 四种配置都是 20~50 像素，占画出来的像素 0.06%，
+                                    // 也就是没有深度打架可修。偏移换不来东西，却真的
+                                    // 有让贴花赢过该挡住它的头发的风险，所以不要。
                                     decal.userData.faceDecal = true;
                                     decal.needsUpdate = true;
                                     faceDecalMaterials.set(child.material, decal);
@@ -3784,6 +4088,49 @@
                                 return cinematic;
                             },
                             syncClipToCinematic: syncClipToCinematic,
+                            // 动作和演出各有一套时钟：syncClipToCinematic 拿
+                            // 时间轴的帧号除时间轴的 fps 去当动作的秒数。这
+                            // 里把两边的长度、根骨位移都挂出来，不然对不上
+                            // 的时候只能靠肉眼猜是位置错了还是时间错了。
+                            clipInfo: function () {
+                                return Object.keys(clipByName).map(function (name) {
+                                    var clip = clipByName[name];
+                                    var rootTrack = null;
+                                    clip.tracks.forEach(function (track) {
+                                        if (rootTrack || !/\.position$/.test(track.name)) {
+                                            return;
+                                        }
+                                        if (!/root|Hips|hip/i.test(track.name)) {
+                                            return;
+                                        }
+                                        var values = track.values;
+                                        var min = Infinity;
+                                        var max = -Infinity;
+                                        for (var i = 0; i < values.length; i += 3) {
+                                            if (values[i] < min) { min = values[i]; }
+                                            if (values[i] > max) { max = values[i]; }
+                                        }
+                                        rootTrack = {
+                                            node: track.name.replace(/\.position$/, ""),
+                                            keys: track.times.length,
+                                            lastTime: track.times[track.times.length - 1],
+                                            xMin: min,
+                                            xMax: max
+                                        };
+                                    });
+                                    return {
+                                        name: name,
+                                        duration: clip.duration,
+                                        tracks: clip.tracks.length,
+                                        active: Boolean(activeClipAction
+                                            && activeClipAction.getClip() === clip),
+                                        time: activeClipAction
+                                            && activeClipAction.getClip() === clip
+                                            ? activeClipAction.time : null,
+                                        root: rootTrack
+                                    };
+                                });
+                            },
                             render: function () {
                                 if (cinematic) {
                                     renderCinematicFrame();
@@ -3855,8 +4202,15 @@
                                             material.blendSrcAlpha = THREE.OneFactor;
                                             material.blendDstAlpha = THREE.OneMinusSrcAlphaFactor;
                                             material.depthWrite = true;
-                                        } else {
+                                        } else if (mode === "coverage") {
+                                            // 出货默认不再是这个,但对比脚本还要
+                                            // 能把它调回来量。
                                             material.alphaToCoverage = true;
+                                            material.transparent = false;
+                                            material.blending = THREE.NormalBlending;
+                                            material.depthWrite = true;
+                                        } else {
+                                            material.alphaToCoverage = false;
                                             material.transparent = false;
                                             material.blending = THREE.NormalBlending;
                                             material.depthWrite = true;
@@ -3994,7 +4348,7 @@
                                 eventIndex: facialEventIndex,
                                 followsAction: faceFollowsAction,
                                 action: activeAction,
-                                events: facialActions && facialActions[activeAction],
+                                events: facialActions && facialActions[baseActionOf(activeAction)],
                                 fps: facialActionState.fps,
                                 clipTime: activeClipAction && activeClipAction.time,
                                 clipDuration: activeClipAction && activeClipAction.getClip().duration,
@@ -4076,6 +4430,14 @@
                     ]).then(function (borrowed) {
                         var classClips = borrowed[0].concat(borrowed[1]);
                         var clips = [];
+                        // 按需取回来的那些（大招、扩展动作）要留住。这次合并原本
+                        // 直接把 clipByName 清空重建，而占位按钮从第一次挂动作条
+                        // 起就在了 —— 在这个 promise 落地之前点过的大招或扩展动作
+                        // 已经下载并存进了 clipByName，清空就把它们丢了，可
+                        // skillClipsRequested / extensionClassesRequested 还记着
+                        // 「取过了」，按钮于是不再显示待下载，点下去也没有片段：
+                        // 一个再也放不出来的按钮。
+                        var fetched = clipByName;
                         clipByName = {};
                         classClips.concat(gltf.animations).forEach(function (clip) {
                             if (!clipByName[clip.name]) {
@@ -4083,6 +4445,24 @@
                                 clips.push(clip);
                             }
                         });
+                        // ?nopreserve=1 关掉这段，用来复现上面那个 bug。本地量不
+                        // 出来：职业动作那 320 KiB 从 localhost 取只要几百毫秒，
+                        // 动作条第一次挂出来到合并落地之间根本来不及点。要把窗口
+                        // 撑开得故意压住本职业那个包（.codex-tmp/ext_race2.py 用
+                        // Playwright 把 class-4/ 延迟 8 秒，另一个职业照常）。
+                        // 压住之后量出来的（model_pl_130008）：
+                        //   nopreserve=1  ext_0_attack 取到了，合并之后片段没了、
+                        //                 按钮也没了，什么都不在播
+                        //   默认          片段还在，按钮还在，正在播 ext_0_attack
+                        // 大招走的是同一条路，同样量过：skill 一样会整个消失。
+                        if (!FRINGE_QUERY.get("nopreserve")) {
+                            Object.keys(fetched).forEach(function (name) {
+                                if (!clipByName[name]) {
+                                    clipByName[name] = fetched[name];
+                                    clips.push(fetched[name]);
+                                }
+                            });
+                        }
                         mountActionControls(clips);
                         if (!actionChosenByUser) {
                             activeAction = clipByName.idle ? "idle" : clipByName.room_idle_L ? "room_idle_L" : clips[0] && clips[0].name;
@@ -4400,8 +4780,9 @@
                 updateVisibilityFromClip();
                 updateEnemyProceduralMotion(delta);
                 if (facialTable) {
-                    updateFacialBlink(time);
-                } else if (faceFollowsAction && activeAction === "idle" && activeFaceSelection) {
+                    updateFacialBlink(time, motionEnabled);
+                } else if (motionEnabled && faceFollowsAction
+                    && activeAction === "idle" && activeFaceSelection) {
                     var blinkEye = resolveFacePartName("eye", "eye_C", true);
                     if (!blinkActive && time >= nextBlinkAt && blinkEye) {
                         var blinkSelection = Object.assign({}, activeFaceSelection, { eye: blinkEye });
@@ -4414,6 +4795,13 @@
                         selectFace(actionFacePresets[activeAction] || "normal", true);
                     }
                 } else {
+                    // 没有表情表的模型走这条。暂停或换动作时如果正眨到一半，得把
+                    // 脸交回去，否则眼睛就一直闭着 —— 上面那条有表情表的路径本来
+                    // 就会 applyFacialState(wanted)，这条以前漏了，而现在暂停也会
+                    // 落到这里，漏的后果从「换动作偶尔闭眼」变成「一暂停就闭眼」。
+                    if (blinkActive) {
+                        selectFace(actionFacePresets[activeAction] || "normal", true);
+                    }
                     blinkActive = false;
                     nextBlinkAt = time + 2800;
                 }
