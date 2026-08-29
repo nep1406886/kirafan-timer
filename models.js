@@ -1094,6 +1094,55 @@
             var viewPolar = Math.PI / 2;
             var viewZoom = "full";
 
+            // 脸部取景要对准的那个盒子，从五官网格本身量出来。
+            //
+            // 之前是按比例猜的：modelBounds.max.y 往下 9% 身高，注释写「脸大概占
+            // 身高的 1/7」。这批模型上不成立 —— max.y 含发饰和双马尾，头身比也
+            // 不是 1/7。model_en_7000 实测：这么算出来的目标在 y≈0.918，而嘴在
+            // 0.665、眼在 0.68..0.82，镜头对准的是头发顶。1708x1300 的缓冲里嘴
+            // 落在 y≈1560，也就是画面底边以下，眼睛只进来一半。
+            //
+            // 顶点位置必须过一遍蒙皮。五官是贴在头骨上的小片，Box3.setFromObject
+            // 只读 geometry 和 matrixWorld，拿到的是 bind pose —— 同一个模型上它
+            // 报的嘴在 y=1508，和蒙皮后的位置差了整个画面。applyBoneTransform 做
+            // 的正是顶点着色器做的事，所以这里读到的就是真正被光栅化的位置。
+            var FACE_PART_NAME = /(^|_)(eye|eyebrow|eyebrrow|eyeblow|mouth|cheek)(_|$)/i;
+            // 五官要按 alpha 混合画，而图集是和身体共用的，所以得给五官单独一份
+            // 材质。按原材质做键缓存，一个图集只克隆一次。
+            var faceDecalMaterials = new WeakMap();
+            function faceAnchorBox() {
+                if (!modelObject) {
+                    return null;
+                }
+                var box = new THREE.Box3();
+                var vertex = new THREE.Vector3();
+                modelObject.traverse(function (child) {
+                    if (!child.isMesh || !child.visible || !FACE_PART_NAME.test(child.name)) {
+                        return;
+                    }
+                    var parent = child.parent;
+                    while (parent) {
+                        if (!parent.visible) { return; }
+                        parent = parent.parent;
+                    }
+                    var position = child.geometry && child.geometry.attributes.position;
+                    if (!position) {
+                        return;
+                    }
+                    var skinned = child.isSkinnedMesh
+                        && child.geometry.attributes.skinWeight;
+                    for (var i = 0; i < position.count; i++) {
+                        vertex.fromBufferAttribute(position, i);
+                        if (skinned) {
+                            child.applyBoneTransform(i, vertex);
+                        }
+                        child.localToWorld(vertex);
+                        box.expandByPoint(vertex);
+                    }
+                });
+                return box.isEmpty() ? null : box;
+            }
+
             function applyView(animated) {
                 if (!homeView) {
                     return;
@@ -1104,9 +1153,21 @@
                 var target = homeView.target.clone();
                 var radius = homeView.position.distanceTo(homeView.target);
                 if (viewZoom === "face") {
-                    // 头顶往下约一个头高。脸部在这些模型上大概占身高的 1/7。
-                    target.y = modelBounds.max.y - span.y * 0.09;
-                    radius *= 0.26;
+                    // 每次按下都重新量：头会跟着动作走，用挂载时的那份会漂。
+                    var face = faceAnchorBox();
+                    if (face) {
+                        var faceSize = face.getSize(new THREE.Vector3());
+                        face.getCenter(target);
+                        // 五官盒子只框住眼鼻嘴，上下留 2.4 倍余量，把额头、
+                        // 下巴和两侧头发一起收进画面。
+                        var want = Math.max(faceSize.x, faceSize.y) * 2.4;
+                        radius = (want * 0.5)
+                            / Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5));
+                    } else {
+                        // 没有五官网格的（武器、道具）退回按比例估。
+                        target.y = modelBounds.max.y - span.y * 0.09;
+                        radius *= 0.26;
+                    }
                 } else if (viewZoom === "feet") {
                     target.y = modelBounds.min.y + span.y * 0.06;
                     radius *= 0.3;
@@ -3532,6 +3593,52 @@
                             // 见上面 mount3DModel 前的那段。
                             child.material.alphaToCoverage = !blended;
                             child.material.userData.edgeBlended = true;
+                            // 五官是例外，必须按 alpha 混合画。
+                            //
+                            // 上面那套 cutout 会把 alpha 丢掉：过了 alphaTest 的
+                            // 纹素一律按不透明画。身体上没问题，因为那些层本来就是
+                            // 实心的。五官不是 —— model_en_7000 的 mouth_A 是 13x8
+                            // 一小片，alpha 最高只有 100/255（39%），没有一个纹素是
+                            // 实心的，alpha 和亮度的相关性是 -0.178，也就是说那份
+                            // 暗色是画上去的，不是合成痕迹。作者的意思是「拿 39%
+                            // 的透明度把一条灰线压在皮肤上」，皮肤 233 的话应该出
+                            // 0.61*233≈142。实测按 cutout 画出来均值 70.2，自身
+                            // 62.92% 的像素低于亮度 90，最暗 0 —— 一条 39% 的线被
+                            // 画成了近乎全黑的一块。这就是反馈里的「嘴的黑边」。
+                            //
+                            // alphaToCoverage 本该把 39% alpha 变成 39% 覆盖率，
+                            // 但它靠的是 MSAA 采样数，实测没救回来。
+                            //
+                            // 用 CustomBlending 而不是 transparent=true：后者会把
+                            // 网格丢进透明队列按相机距离排序，也就是上面记的那个
+                            // 帽檅接缝的退步。transparent 保持 false，队列和排序键
+                            // 还是游戏自己的 renderOrder（m_HieIndex），只是混合
+                            // 方程换成了正常的 SrcAlpha/OneMinusSrcAlpha。五官的
+                            // renderOrder 是 29036..29045，画在脸之后，本来也没有
+                            // 东西该出现在它们背后。
+                            //
+                            // alphaTest 留一点点：alpha 为 0 的纹素还是要 discard，
+                            // 否则它们照样写深度，会挡住后面该画的东西。
+                            if (FACE_PART_NAME.test(child.name || "")) {
+                                var decal = faceDecalMaterials.get(child.material);
+                                if (!decal) {
+                                    decal = child.material.clone();
+                                    decal.userData = Object.assign({},
+                                        child.material.userData);
+                                    decal.transparent = false;
+                                    decal.blending = THREE.CustomBlending;
+                                    decal.blendSrc = THREE.SrcAlphaFactor;
+                                    decal.blendDst = THREE.OneMinusSrcAlphaFactor;
+                                    decal.blendSrcAlpha = THREE.OneFactor;
+                                    decal.blendDstAlpha = THREE.OneMinusSrcAlphaFactor;
+                                    decal.alphaToCoverage = false;
+                                    decal.alphaTest = 0.004;
+                                    decal.userData.faceDecal = true;
+                                    decal.needsUpdate = true;
+                                    faceDecalMaterials.set(child.material, decal);
+                                }
+                                child.material = decal;
+                            }
                             // 各向异性过滤：mipmap 会在斜视时整体降级，裙摆、袖子
                             // 和鞋子朝地的那一面因此发糊。
                             if (maxAnisotropy > 1 && child.material.map
