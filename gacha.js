@@ -848,10 +848,18 @@
         return playSummonAudio("summonBgm", summonAudioFiles.gachaBgm, 0.28, true);
     }
 
-    function playResultVoice(hasRare4OrAbove) {
-        // 原版结算语音按手上是否出现 4★+ 播放两个固定 cue：Rare≥4 用
-        // voice_gacha_003，否则 voice_gacha_004（都在 Voice_Original_006）。
-        playSummonAudio("resultVoice", hasRare4OrAbove ? "audio/gacha/voice_gacha_003.mp3" : "audio/gacha/voice_gacha_004.mp3", 0.98, false);
+    function playResultVoice(hasFiveStar) {
+        // 原版结算语音只有两档：出了 ★5 用 voice_gacha_003，其余（含 ★4）一律
+        // voice_gacha_004。两个 cue 都在 Voice_Original_006。
+        //
+        // GachaResult.PlayResultVoice 的判据是 CharaListDB.m_Rare >= 4，而
+        // CharacterList.m_Rare 是 0 基的：整张表只取 2/3/4 三个值（各 89 / 452 /
+        // 740 条，没有 5），也就是 ★3/★4/★5。所以 m_Rare>=4 就是「只有 ★5」，
+        // 不是「★4 及以上」。这里原先照字面写成了 rarity >= 4，而本页的
+        // card.rarity 是 1 基的（别处判 ★5 都写 === 5），于是单出 ★4 也会播那句
+        // 「す、すごかったです！」——同一屏的字幕却是按 fiveStarCount 选的，两边
+        // 对不上。
+        playSummonAudio("resultVoice", hasFiveStar ? "audio/gacha/voice_gacha_003.mp3" : "audio/gacha/voice_gacha_004.mp3", 0.98, false);
     }
 
     function playTitleVoice(card) {
@@ -1401,7 +1409,7 @@
             updateRecordDisplay();
             renderResults(resultItems);
             playGachaBgm();
-            playResultVoice(results.some(function (card) { return card.rarity >= 4; }));
+            playResultVoice(results.some(function (card) { return card.rarity === 5; }));
             state.summonInProgress = false;
             setSummonButtonsDisabled(false);
             byId("resultsTitle").focus({ preventScroll: true });
