@@ -23,6 +23,12 @@
     // TOTTEOKI_MIN_RARITY in tools/build_rarity_table.py.
     var TOTTEOKI_MIN_RARITY = 4;
     var RARITY_TABLE_URL = "asset/models/rarity.json?v=20260829-1";
+    // Per-clip node visibility, from the game's own MeigeAnimClip tracks. glTF
+    // has no channel for "hide this node", so the exported GLB draws all twelve
+    // leg silhouettes and both hats at once; the table says which single one the
+    // clip means. Written by tools/build_visibility_table.py.
+    var VISIBILITY_TABLE = null;
+    var VISIBILITY_TABLE_URL = "asset/models/visibility.json?v=20260829-1";
     var PLAYER_MODEL_META = {};
     var MODEL_TITLES = [];
     var manifestState = { loaded: false, error: false, offline: false };
@@ -692,6 +698,15 @@
             var faceParts = { eye: {}, eyebrow: {}, mouth: {}, overlay: {} };
             var enemyVisualParts = {};
             var enemyVariantParts = [];
+            var duplicateMeshesHidden = 0;
+            // {node name: [Object3D, ...]} for every node the visibility table
+            // governs on this model, and the track set for the clip now playing.
+            var visibilityNodes = {};
+            // {variant set: how many members this model owns}. A set with one
+            // member has nothing to switch to, so its curve must not hide it.
+            var visibilitySets = {};
+            var visibilityTracks = null;
+            var visibilityFrame = -1;
             var faceSelects = {};
             // The authoritative expression table for this character, or null for
             // a model that has none (enemies, and the 34 player models with no
@@ -1159,6 +1174,252 @@
                 });
             }
 
+            // Every player bundle draws each leg card six times over: the
+            // exporter emits leg_L_A/_B/_C plus a leg_L_A_2/_B_2/_C_2 for each,
+            // and the _2 nodes are byte-identical to their partner — same
+            // POSITION/NORMAL/TEXCOORD_0/JOINTS_0/WEIGHTS_0 accessors, same
+            // index buffer, same material, same skeleton. (The exporter dedupes
+            // accessors by content, so identical accessor indices prove the
+            // source Unity meshes were identical too.) Six coincident
+            // alpha-masked double-sided draws is not just wasted fill: the
+            // cut-out edge is composited against itself and z-fights, which is
+            // the muddy fringe at the feet.
+            //
+            // The test is content, not naming: two meshes are redundant when
+            // they would rasterise the same pixels — same geometry buffers,
+            // same material, same skeleton, same world transform. That catches
+            // the leg pairs without a rule that could ever hide the one copy of
+            // a part whose name merely looks like a variant.
+            var arrayIds = new WeakMap();
+            var nextArrayId = 1;
+
+            function bufferIdentity(attribute) {
+                if (!attribute) {
+                    return "-";
+                }
+                // Compare the backing store, not the BufferAttribute wrapper:
+                // three.js clones the wrapper for skinned meshes (it normalises
+                // skin weights in place) while both clones keep pointing at the
+                // one typed array the loader decoded.
+                var array = attribute.array;
+                if (!arrayIds.has(array)) {
+                    arrayIds.set(array, nextArrayId++);
+                }
+                return arrayIds.get(array)
+                    + ":" + attribute.itemSize
+                    + ":" + attribute.count
+                    + ":" + (attribute.offset || 0);
+            }
+
+            function geometryIdentity(geometry) {
+                if (!geometry) {
+                    return "-";
+                }
+                var parts = [bufferIdentity(geometry.index)];
+                Object.keys(geometry.attributes).sort().forEach(function (name) {
+                    parts.push(name + "=" + bufferIdentity(geometry.attributes[name]));
+                });
+                Object.keys(geometry.morphAttributes || {}).sort().forEach(function (name) {
+                    parts.push("morph:" + name + "="
+                        + geometry.morphAttributes[name].map(bufferIdentity).join(","));
+                });
+                return parts.join("|");
+            }
+
+            function materialIdentity(material) {
+                return Array.isArray(material)
+                    ? material.map(function (entry) { return entry && entry.uuid; }).join(",")
+                    : (material && material.uuid) || "-";
+            }
+
+            function hideCoincidentDuplicates(root) {
+                if (!root) {
+                    return 0;
+                }
+                root.updateMatrixWorld(true);
+                var seen = {};
+                var hidden = 0;
+                root.traverse(function (child) {
+                    if (!child.isMesh || !child.visible) {
+                        return;
+                    }
+                    // The visibility table already picks one copy per set, and it
+                    // is the authority: it sometimes picks the _2 partner, which
+                    // this pass would have hidden as the "duplicate".
+                    if (child.userData.visibilityGoverned) {
+                        return;
+                    }
+                    var key = geometryIdentity(child.geometry)
+                        + "#" + materialIdentity(child.material)
+                        // A skinned mesh is placed by its bones, so its own
+                        // world matrix is usually identity and says nothing;
+                        // the skeleton is what decides where it lands.
+                        + "#" + ((child.skeleton && child.skeleton.uuid) || "-")
+                        + "#" + child.matrixWorld.elements.map(function (value) {
+                            return value.toFixed(5);
+                        }).join(",");
+                    if (seen[key]) {
+                        child.visible = false;
+                        child.userData.coincidentDuplicateOf = seen[key];
+                        hidden += 1;
+                        return;
+                    }
+                    seen[key] = child.name || "(unnamed)";
+                });
+                return hidden;
+            }
+
+            // --- per-clip node visibility ------------------------------------
+            //
+            // The body is authored with alternate silhouettes of the same limb:
+            // leg_L_A/_B/_C, a leg_L_A_2/_B_2/_C_2 beside each, hat_L against
+            // hat_R. Exactly one of each set belongs on screen, and which one
+            // depends on the pose -- room_idle_L stands on leg_L_C_2 and leg_R_B,
+            // battle_out on leg_L_B and leg_R_C_2. The game keeps that switch in
+            // its own clip format, which glTF cannot carry, so the GLB has no
+            // record of it and the viewer drew all twelve at once: six coincident
+            // alpha-masked layers per leg, which is the smear at the feet.
+            //
+            // A track is either a constant 0/1 or a list of stepped [frame, value]
+            // keys; stepped means hold the last key, never interpolate.
+
+            // leg_L_A, leg_L_A_2 and leg_L_C all belong to the set "leg_l"; hat_L
+            // and hat_R to "hat". One member of a set is on at a time.
+            function variantSetOf(name) {
+                var match = /^(leg_[lr]|hat)_/.exec(String(name || "").toLowerCase());
+                return match ? match[1] : String(name || "").toLowerCase();
+            }
+
+            function indexVisibilityNodes() {
+                // The table is read out of the player animation bundles and its
+                // node names are the player rig's. An enemy that happened to name
+                // a part hat_L would otherwise be switched off by a curve that was
+                // never about it; enemies have their own name-based pass.
+                if (!VISIBILITY_TABLE || !modelObject || modelKind === "enemy") {
+                    return;
+                }
+                var governed = {};
+                (VISIBILITY_TABLE.nodes || []).forEach(function (name) {
+                    governed[name.toLowerCase()] = name;
+                });
+                modelObject.traverse(function (child) {
+                    if (!child.isMesh) {
+                        return;
+                    }
+                    var key = governed[String(child.name || "").toLowerCase()];
+                    if (!key) {
+                        return;
+                    }
+                    visibilityNodes[key] = visibilityNodes[key] || [];
+                    visibilityNodes[key].push(child);
+                    visibilitySets[variantSetOf(key)] = (visibilitySets[variantSetOf(key)] || 0) + 1;
+                    // Content-dedup must never win an argument with the table:
+                    // the chosen copy is sometimes the _2 one (leg_L_C_2 in
+                    // room_idle_L), and dedup keeps whichever it met first.
+                    child.userData.visibilityGoverned = true;
+                });
+            }
+
+            function visibilityTracksFor(clipName) {
+                if (!VISIBILITY_TABLE || !clipName) {
+                    return null;
+                }
+                // Class actions share the names idle/attack/class_skill_* across
+                // five classes but pose them differently, so the class table wins
+                // where it has an entry.
+                var byClass = VISIBILITY_TABLE.classClips || {};
+                var classTable = metadata && Number.isFinite(metadata.class)
+                    ? byClass[String(metadata.class)]
+                    : null;
+                if (classTable && classTable[clipName]) {
+                    return classTable[clipName];
+                }
+                return VISIBILITY_TABLE.clips[clipName] || null;
+            }
+
+            function visibilityValueAt(track, frame) {
+                if (!Array.isArray(track)) {
+                    return track ? 1 : 0;
+                }
+                var value = track.length ? track[0][1] : 1;
+                for (var i = 0; i < track.length; i += 1) {
+                    if (track[i][0] > frame) {
+                        break;
+                    }
+                    value = track[i][1];
+                }
+                return value;
+            }
+
+            function applyVisibilityTracks(frame) {
+                if (!visibilityTracks) {
+                    return;
+                }
+                Object.keys(visibilityTracks).forEach(function (name) {
+                    var nodes = visibilityNodes[name];
+                    if (!nodes) {
+                        return;
+                    }
+                    // model_pl_120301 and _120302 ship hat_R and no hat_L, and
+                    // the right-facing clips ask for hat_L: obeying that would
+                    // take away the only hat they have. With nothing to switch
+                    // to, the switch is not meaningful — leave it on.
+                    if (visibilitySets[variantSetOf(name)] < 2) {
+                        nodes.forEach(function (node) { node.visible = true; });
+                        return;
+                    }
+                    var visible = visibilityValueAt(visibilityTracks[name], frame) === 1;
+                    nodes.forEach(function (node) {
+                        node.visible = visible;
+                    });
+                });
+            }
+
+            // A model is on screen before any clip is chosen, and for an enemy or
+            // a procedural preview no clip is ever chosen. Standing pose first,
+            // so the default is never the all-twelve-layers look.
+            function applyDefaultVisibility() {
+                if (!VISIBILITY_TABLE) {
+                    return;
+                }
+                var order = ["room_idle_L", "idle", "battle_run"];
+                for (var i = 0; i < order.length; i += 1) {
+                    var tracks = visibilityTracksFor(order[i]);
+                    if (tracks) {
+                        visibilityTracks = tracks;
+                        visibilityFrame = -1;
+                        applyVisibilityTracks(0);
+                        return;
+                    }
+                }
+            }
+
+            function selectVisibilityClip(clipName) {
+                var tracks = visibilityTracksFor(clipName);
+                // A clip with no entry (the とっておき, a retargeted skill) leaves
+                // the last pose's choice standing rather than reverting to all
+                // twelve layers, which would look like the bug coming back.
+                if (!tracks) {
+                    return;
+                }
+                visibilityTracks = tracks;
+                visibilityFrame = -1;
+                applyVisibilityTracks(0);
+            }
+
+            function updateVisibilityFromClip() {
+                if (!visibilityTracks || !activeClipAction) {
+                    return;
+                }
+                var fps = (VISIBILITY_TABLE && VISIBILITY_TABLE.fps) || 30;
+                var frame = Math.floor(activeClipAction.time * fps);
+                if (frame === visibilityFrame) {
+                    return;
+                }
+                visibilityFrame = frame;
+                applyVisibilityTracks(frame);
+            }
+
             function applyEnemyVisualState(action) {
                 if (modelKind !== "enemy") {
                     return;
@@ -1274,6 +1535,9 @@
                     activeClipAction.fadeOut(0.18);
                 }
                 activeClipAction = nextAction;
+                // The clip name, not the button label: the table is keyed by the
+                // exported clip name the same way clipByName is.
+                selectVisibilityClip(selectedButton.dataset.clip);
                 updateTransport(true);
             }
 
@@ -2076,6 +2340,10 @@
                 })).then(function () {
                     if (request === weaponRequest) {
                         updateWeaponControls(mode, false);
+                        // Weapon bundles ship the same doubled parts the bodies
+                        // do (weapon_wand_obj + weapon_wand_2_obj), and they
+                        // only exist in the scene once they are socketed.
+                        hideCoincidentDuplicates(modelObject);
                         modelObject.updateMatrixWorld(true);
                         fitModelView();
                     }
@@ -2322,6 +2590,45 @@
                             setPixelRatio: function (value) {
                                 renderer.setPixelRatio(value);
                                 resize();
+                            },
+                            duplicatesHidden: function () { return duplicateMeshesHidden; },
+                            // Stop the clip so two captures differ only by what
+                            // the test changed, not by where the idle loop got to.
+                            freeze: function () { motionEnabled = false; },
+                            showAllVariants: function () {
+                                // What the viewer looked like before the table:
+                                // every silhouette layer at once.
+                                var shown = 0;
+                                Object.keys(visibilityNodes).forEach(function (name) {
+                                    visibilityNodes[name].forEach(function (node) {
+                                        if (!node.visible) {
+                                            node.visible = true;
+                                            shown += 1;
+                                        }
+                                    });
+                                });
+                                visibilityTracks = null;
+                                return shown;
+                            },
+                            visibility: function () {
+                                return {
+                                    tableLoaded: Boolean(VISIBILITY_TABLE),
+                                    governed: Object.keys(visibilityNodes).length,
+                                    tracks: visibilityTracks && Object.keys(visibilityTracks).length,
+                                    frame: visibilityFrame
+                                };
+                            },
+                            showDuplicates: function () {
+                                // Toggle the fix back off so a before/after can be
+                                // measured on one load instead of two.
+                                var restored = 0;
+                                modelObject.traverse(function (child) {
+                                    if (child.isMesh && child.userData.coincidentDuplicateOf) {
+                                        child.visible = true;
+                                        restored += 1;
+                                    }
+                                });
+                                return restored;
                             }
                         };
                         // Enough of the facial engine to check it from outside:
@@ -2430,6 +2737,13 @@
                             });
                     }
                     hideEnemyDuplicateVariants();
+                    // Before dedup, so the nodes the table owns are marked and
+                    // dedup leaves them alone.
+                    indexVisibilityNodes();
+                    // After the name-based enemy pass, so the rank it picked is
+                    // the copy that survives.
+                    duplicateMeshesHidden = hideCoincidentDuplicates(modelObject);
+                    applyDefaultVisibility();
                     applyEnemyVisualState("idle");
                     gltf.animations.forEach(function (clip) {
                         clipByName[clip.name] = clip;
@@ -2702,6 +3016,9 @@
                     mixer.update(delta);
                     updateTransport();
                 }
+                // Also when paused or scrubbed: the switch belongs to the frame,
+                // not to the passage of time.
+                updateVisibilityFromClip();
                 updateEnemyProceduralMotion(delta);
                 if (facialTable) {
                     updateFacialBlink(time);
@@ -2982,6 +3299,9 @@
             if (manifest.rarity) {
                 RARITY_TABLE_URL = manifest.rarity;
             }
+            if (manifest.visibility) {
+                VISIBILITY_TABLE_URL = manifest.visibility;
+            }
             manifestState.loaded = true;
         }).catch(function () {
             if (attempt < 2) {
@@ -3018,6 +3338,29 @@
             });
         }).catch(function () {
             manifestState.rarityError = true;
+        });
+    }
+
+    // 13 KiB, and every player model needs it the moment its first clip plays.
+    // A failure leaves VISIBILITY_TABLE null and the viewer falls back to drawing
+    // whatever the GLB ships -- the same too-many-layers look as before the table
+    // existed, which is wrong but not broken.
+    function loadVisibilityTable() {
+        if (IS_LOCAL_FILE) {
+            return Promise.resolve();
+        }
+        return fetch(VISIBILITY_TABLE_URL).then(function (response) {
+            if (!response.ok) {
+                throw new Error("HTTP " + response.status);
+            }
+            return response.json();
+        }).then(function (table) {
+            if (!table || !table.clips || typeof table.clips !== "object") {
+                throw new Error("invalid visibility table");
+            }
+            VISIBILITY_TABLE = table;
+        }).catch(function () {
+            manifestState.visibilityError = true;
         });
     }
 
@@ -3072,5 +3415,8 @@
     bindControls();
     // The rarity table's URL can be overridden by the manifest, so it is fetched
     // after the manifest resolves and before the database populates the grid.
-    loadPreviewManifest().then(loadRarityTable).then(loadDatabase);
+    loadPreviewManifest().then(function () {
+        // Both are small and independent; neither blocks the other.
+        return Promise.all([loadRarityTable(), loadVisibilityTable()]);
+    }).then(loadDatabase);
 })();
