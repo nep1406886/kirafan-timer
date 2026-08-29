@@ -1058,14 +1058,32 @@
                 dead: "abnormal"
             };
 
-            // 渲染精度。素材是 512x512 贴图，角色在台上约 600-700 px 高，等于把
-            // 贴图放大着看，所以采样质量决定了成像是否清晰。
+            // 渲染精度。素材是 512x512 贴图（敌人里有 234 个只有 256x256），角色
+            // 在台上约 600-700 px 高，等于把贴图放大着看，所以采样质量决定了成像
+            // 是否清晰。
             //
-            // 这里按 CSS 像素的 2 倍超采样：devicePixelRatio 为 1 的普通屏也强制
-            // 2x，渲染后由浏览器缩回,相当于 SSAA。只用 devicePixelRatio 的话，
-            // 1x 屏幕会逐像素点对点采样，头发丝和扇骨这类一像素宽的结构直接碎掉。
-            var superSample = Math.max(2, Math.min(window.devicePixelRatio || 1, 2));
-            renderer.setPixelRatio(superSample);
+            // 两条底线：每个 CSS 像素至少 2 个采样点（1x 屏幕点对点采样的话，头发
+            // 丝和扇骨这类一像素宽的结构直接碎掉），以及绘制缓冲永远不小于画布真正
+            // 占据的物理像素数。
+            //
+            // 原来写的是 max(2, min(dpr, 2))，里层的 min 先把值压到 2，外层的 max
+            // 就再也起不了作用 —— 无论什么屏幕都恒等于 2。实测：dpr 1 得到 2.000
+            // 倍（符合注释），dpr 2 得到 1.000 倍（等于原生，根本没有超采样），
+            // dpr 3 得到 0.667 倍，也就是渲染得比原生还小，再由浏览器放大回去，
+            // 比什么都不做更糊。
+            //
+            // 上限 3 是为了控制填充开销：缓冲面积按倍率平方增长，而 dpr 3 的设备
+            // 通常是手机。
+            // A/B 测量要能把倍率按住不动，而 resize 会跟着 dpr 重算 —— 没有这个
+            // 开关，__rendererDebug.setPixelRatio 设下的值会被 resize 立刻盖掉。
+            var sampleRatioOverride = null;
+            function sampleRatio() {
+                if (sampleRatioOverride) {
+                    return sampleRatioOverride;
+                }
+                return Math.min(Math.max(2, window.devicePixelRatio || 1), 3);
+            }
+            renderer.setPixelRatio(sampleRatio());
             // 由显卡上报上限决定，不写死：桌面通常是 16，移动端常见 2 或 4。
             var maxAnisotropy = renderer.capabilities.getMaxAnisotropy
                 ? renderer.capabilities.getMaxAnisotropy()
@@ -2834,6 +2852,13 @@
                 var height = Math.max(1, host.clientHeight);
                 camera.aspect = width / height;
                 camera.updateProjectionMatrix();
+                // 把窗口从一块屏幕拖到另一块缩放不同的屏幕上，devicePixelRatio 会
+                // 变，而倍率只在初始化时算过一次 —— 于是缓冲会停在旧屏幕的倍率上。
+                // 这里跟着重算，值没变时 three.js 自己会跳过。
+                var ratio = sampleRatio();
+                if (renderer.getPixelRatio() !== ratio) {
+                    renderer.setPixelRatio(ratio);
+                }
                 renderer.setSize(width, height, false);
                 if (cinematic) {
                     // 正交相机的 left/right 由播放器按 aspect 每帧重算。演出
@@ -3783,8 +3808,10 @@
                                 };
                             },
                             setPixelRatio: function (value) {
-                                renderer.setPixelRatio(value);
+                                sampleRatioOverride = value || null;
+                                renderer.setPixelRatio(sampleRatio());
                                 resize();
+                                return renderer.getPixelRatio();
                             },
                             duplicatesHidden: function () { return duplicateMeshesHidden; },
                             facingVariantsHidden: function () { return facingVariantsHidden; },
