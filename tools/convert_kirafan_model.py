@@ -315,6 +315,31 @@ class KirafanExporter:
             if child is not None:
                 self.collect_animation_paths(kind, child, f"{path}/{self.object_name(child)}")
 
+    @staticmethod
+    def fit_alpha(alpha: Image.Image, size: tuple[int, int]) -> Image.Image:
+        """Resize an alpha layer onto the colour map's grid.
+
+        Enemies ship the alpha layer at half the colour map's resolution
+        (model_en_7000: 256x256 against a 512x512 atlas), so this is a 2x
+        upscale on most of them and a no-op on players.
+
+        It has to be BILINEAR.  NEAREST turns every source texel into a hard
+        2x2 block -- measured on model_en_7000, 100.0% of the 2x2 blocks in the
+        edge band come out perfectly flat, against 0.6% for BILINEAR -- which
+        replaces the authored 1-texel anti-aliased ramp with a staircase locked
+        to the 256 grid.  The viewer then magnifies that ~3x (one atlas texel
+        covers 2.75-3.40 device pixels), so each block becomes a ~6 pixel square
+        step.  That staircase is baked into the texture, which is why no amount
+        of MSAA or supersampling in the viewer could remove it.
+
+        LANCZOS is not used: it keeps the gradient as steep as NEAREST (0.2228
+        vs 0.2140, against BILINEAR's 0.1686) because it rings, and ringing on
+        an alpha matte punches pinholes and haloes.
+        """
+        if alpha.size == size:
+            return alpha
+        return alpha.resize(size, Image.Resampling.BILINEAR)
+
     def add_materials(self) -> dict[str, int]:
         textures: dict[str, Image.Image] = {}
         for item in self.environment.objects:
@@ -327,7 +352,7 @@ class KirafanExporter:
             rgb_name = next(name for name in textures if name.endswith(f"_{kind}_rgb"))
             alpha_name = next(name for name in textures if name.endswith(f"_{kind}_a"))
             rgb = textures[rgb_name].convert("RGB")
-            alpha = textures[alpha_name].getchannel("A")
+            alpha = self.fit_alpha(textures[alpha_name].getchannel("A"), rgb.size)
             combined = rgb.copy()
             combined.putalpha(alpha)
             texture_index = self.builder.add_png(combined, f"{kind}_atlas")
@@ -413,10 +438,8 @@ class KirafanExporter:
                 image = rgb_texture.image.convert("RGBA")
             alpha_texture = texture_entries.get("_Texture_AlbedoLayer")
             if alpha_texture is not None:
-                alpha = alpha_texture.image.getchannel("A")
-                if alpha.size != image.size:
-                    alpha = alpha.resize(image.size, Image.Resampling.NEAREST)
-                image.putalpha(alpha)
+                image.putalpha(self.fit_alpha(
+                    alpha_texture.image.getchannel("A"), image.size))
             texture_index = self.builder.add_png(image, material.m_Name)
             entry = {
                 "name": material.m_Name,
