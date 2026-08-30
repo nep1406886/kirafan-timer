@@ -4341,6 +4341,62 @@
                             }
                             return { tracks: clip.tracks.length, bound: bound, duration: clip.duration, samples: samples };
                         };
+                        // 可见性轨道（MeigeAnimClip target type 9）是分段常数，
+                        // 「保持上一个键」。这条轨道决定十二条腿里画哪一条、两顶
+                        // 帽子戴哪一顶，而 battle_in 这类片段会在中途换腿
+                        // （第 8 帧把 leg_L_C_2 换成 leg_L_A_2）。
+                        //
+                        // 要验证换得对不对，就得能停在指定的一帧上读可见性。
+                        // 靠实时播放读不到：预览面板一隐藏 rAF 就停，量到的
+                        // 永远是同一个旧姿势。所以按 __clipDebug 的老办法
+                        // seek —— 暂停 action、写 time、mixer.update(0)。
+                        // 必须走和界面一样的那条路，不能自己直接改可见性：
+                        // updateVisibilityFromClip 读的是 activeClipAction.time，
+                        // 而它由 renderFrame 驱动。第一版这个钩子只 seek 了一个
+                        // 自己新建的 action，既没设 activeClipAction 也没调
+                        // selectVisibilityClip，于是可见性一直停在
+                        // applyDefaultVisibility 留下的那套，量出来 19 处「不符」
+                        // 全是钩子自己的错，不是渲染的错。
+                        window.__visDebug = function (name, seconds, names) {
+                            var clip = clipByName[name];
+                            if (!clip) {
+                                return { error: "no clip", known: Object.keys(clipByName) };
+                            }
+                            var previous = activeClipAction;
+                            var action = mixer.clipAction(clip);
+                            if (previous && previous !== action) {
+                                previous.stop();
+                            }
+                            action.reset();
+                            action.play();
+                            activeClipAction = action;
+                            selectVisibilityClip(name);
+                            action.paused = true;
+                            action.time = seconds;
+                            mixer.update(0);
+                            updateVisibilityFromClip();
+                            var byName = {};
+                            modelObject.traverse(function (o) {
+                                if (o.isMesh) { byName[o.name] = o; }
+                            });
+                            var out = {};
+                            (names || []).forEach(function (n) {
+                                out[n] = Object.prototype.hasOwnProperty.call(byName, n)
+                                    ? !!byName[n].visible
+                                    : null;
+                            });
+                            return {
+                                visible: out,
+                                duration: clip.duration,
+                                frame: Math.floor(seconds * ((VISIBILITY_TABLE
+                                    && VISIBILITY_TABLE.fps) || 30)),
+                                // 查表要靠这个：外借动作查出借职业的表，其余查
+                                // 本职业的。清单里没有职业号，检查脚本只能从
+                                // 这里拿，不然就得靠猜。
+                                modelClass: (metadata && Number.isFinite(metadata.class))
+                                    ? metadata.class : null
+                            };
+                        };
                         window.__facialDebug = function () {
                             return {
                                 table: facialTable,
