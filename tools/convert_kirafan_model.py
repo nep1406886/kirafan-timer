@@ -456,20 +456,65 @@ class KirafanExporter:
     def alpha_state(cls, material: Any) -> dict[str, Any]:
         """Translate a Unity material's blend floats into glTF alpha state.
 
-        The main character materials read _Mode=0 with _SrcBlend=One and
-        _DstBlend=Zero, meaning no blending at all -- they only cut fully
-        transparent texels away, at MsbHandler's m_AlphaTestRefValue.  The
-        "_outline" materials read _Mode=3 with _DstBlend=OneMinusSrcAlpha and
-        _ZWrite=0, and those really are translucent.
+        Every character material in the fleet is drawn by one of two shaders --
+        Meige/MeigeStandardShader and Meige/MeigeStandardShaderWithOutline, the
+        `_outline` suffix on a material name meaning only "uses the variant with
+        the extra rim pass", not "is translucent".  Both were dumped out of
+        residentshaderpack.muast, and their ShaderLab pass state binds
+
+            zWrite   <- [_DepthWrite]      zTest <- [_DepthTest]
+            srcBlend <- [_BlendSrc]     destBlend <- [_BlendDst]
+
+        so the Standard-shader property names the materials also carry --
+        _ZWrite, _SrcBlend, _DstBlend, _Mode -- reach no pass state at all.  They
+        are leftovers from whatever material the artist started from, and reading
+        them was reading dead metadata.  Worse, they are near-perfect complements
+        of the live values, so every one of them was read *backwards*: over 606
+        enemy bundles (1479 materials, all on those two shaders) _ZWrite
+        disagreed with _DepthWrite 1455 times and agreed 24 (.codex-tmp/
+        depth_census.py, shader_depth2.py).
+
+        The depth state is the half that shows.  The 1403 plain materials read
+        _DepthWrite=0: they do not write depth, and MsbHandler's ordered draw
+        list alone decides who covers whom -- which is what lets front hair paint
+        over a face it is coplanar with.  The 52 materials that read
+        _DepthWrite=1 are mostly the ones carrying arms and hands, and their
+        depth write is load-bearing: they are drawn very early (pl_140000 puts
+        `arm` at renderOrder 179 and `hand` at 180, against 3055 and up for
+        hair), so without it the hair drawn afterwards paints over the arm even
+        where the arm is nearer the camera.  Measured on model_pl_140000 frozen
+        in room_idle_L, that left 506 of the arm's 8310 own pixels on screen --
+        6%, the rest replaced by twin-tails; reading _DepthWrite instead brings
+        it to 4017.  Across five models the limb group gains every time (+4648,
+        +3458, +860, +910, +747) while hair loses, the largest single loser being
+        pl_180208's L30_hair_back_A at -2820 -- *back* hair that had been
+        punching through the torso (.codex-tmp/ab_fleet.py, arm_where.py).
+
+        The material name is not a usable proxy for any of this: 29 of the 52
+        depth-writing materials are plainly named, and 15 `_flash` materials read
+        _DepthWrite=0 with _ZWrite=0, so they were the only ones the old reading
+        happened to get right.
+
+        The blend classification below still reads _Mode/_DstBlend.  It is left
+        alone deliberately: both consumers of this glTF (models.js and
+        core/loader.js) override `transparent` and the alpha cut with their own
+        measured rules, so alphaMode changes no pixel, and rewriting it would
+        churn every material entry for no visible gain.
         """
         floats = cls.material_floats(material)
         mode = floats.get("_Mode", 0.0)
         dst = floats.get("_DstBlend", 0.0)
-        z_write = floats.get("_ZWrite", 1.0)
+        # _DepthWrite is what the shader binds.  Fall back to the dead _ZWrite
+        # only for a material that carries no _DepthWrite at all, i.e. one drawn
+        # by some shader outside the two dumped above.
+        if "_DepthWrite" in floats:
+            depth_write = floats["_DepthWrite"] != 0.0
+        else:
+            depth_write = floats.get("_ZWrite", 1.0) != 0.0
         # UnityEngine.Rendering.BlendMode.Zero is 0; anything else blends.
         blends = mode >= 2.0 or dst != 0.0
         if blends:
-            return {"alphaMode": "BLEND", "extras": {"depthWrite": z_write != 0.0}}
+            return {"alphaMode": "BLEND", "extras": {"depthWrite": depth_write}}
         cutoff = floats.get("_AlphaTestRefValue", floats.get("_Cutoff", ALPHA_TEST_REF))
         # _Cutoff defaults to 0.5, which would eat the anti-aliased sprite edge.
         if cutoff >= 0.5:
@@ -477,7 +522,7 @@ class KirafanExporter:
         return {
             "alphaMode": "MASK",
             "alphaCutoff": cutoff,
-            "extras": {"depthWrite": z_write != 0.0},
+            "extras": {"depthWrite": depth_write},
         }
 
     def add_generic_materials(self) -> dict[int, int]:
@@ -906,10 +951,20 @@ class KirafanExporter:
     # own extras: {node name: 0 | 1 | [[frame, value], ...]}.  A constant curve
     # collapses to one number, which is the common case.  Stepped keys
     # (m_CtrlType 2) hold the last value, so the viewer must not interpolate.
+    # Players need no equivalent of this: their clips live in the shared
+    # common_menu_body / common_battle_body bundles, and build_visibility_table.py
+    # already publishes those same target-type-9 tracks to
+    # asset/models/visibility.json, which models.js applies through
+    # VISIBILITY_TABLE.  Verified live on model_pl_140000 at room_idle_L frame 10:
+    # of the 14 governed nodes exactly leg_L_C_2 and leg_R_B are visible, which is
+    # what the bundle's own tracks say (.codex-tmp/vis_live.py).
     def add_generic_visibility(self, bundle: Path) -> None:
         tracks = self.load_visibility_tracks(bundle)
         if not tracks:
             return
+        self.publish_visibility(tracks, bundle.name)
+
+    def publish_visibility(self, tracks: dict[str, dict[str, Any]], source: str) -> None:
         # Mesh-bearing nodes only.  Restricting to these keeps a bone that happens
         # to share a mesh's name out of the table, and the viewer only ever applies
         # the table to meshes anyway.
@@ -936,7 +991,7 @@ class KirafanExporter:
         asset_extras["visibility"] = {
             "source": ("MeigeAnimClip.m_AnimNodeHandlerArray target type 9; "
                        "value 1 = visible, keys are stepped, hold the last key"),
-            "bundle": bundle.name,
+            "bundle": source,
             "clips": published,
         }
 

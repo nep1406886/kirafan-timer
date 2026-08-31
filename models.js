@@ -4125,7 +4125,45 @@
                             //     和排序键还是游戏自己的 renderOrder，混合方程照样
                             //     生效。实测 140007 边缘暗像素 529 → 323。
                             //   （.codex-tmp/blend_ref.py）
-                            var blended = /_outline$/i.test(child.material.name || "");
+                            // 「谁写深度」不能看材质名。上面那段把
+                            // `_outline` 当成半透明装饰壳，是从材质上的
+                            // _Mode/_SrcBlend/_DstBlend/_ZWrite 读出来的；
+                            // 而 residentshaderpack.muast 里两个真正画角色的
+                            // shader（Meige/MeigeStandardShader 和
+                            // ...WithOutline）的 pass 状态绑的是
+                            //   zWrite <-[_DepthWrite]  zTest <-[_DepthTest]
+                            //   srcBlend<-[_BlendSrc]   destBlend<-[_BlendDst]
+                            // 那四个 Standard shader 的属性一个都没接到 pass 上，
+                            // 是美术从别的材质带过来的残留。偏偏它们和真值几乎
+                            // 处处互补：606 个敌人包、1479 个材质里，_ZWrite 和
+                            // _DepthWrite 相反 1455 次、相同 24 次，所以照着名字
+                            // 或照着 _ZWrite 判断，等于**整个舰队都判反了**。
+                            //
+                            // `_outline` 后缀的真实含义只是「用带描边 pass 的那个
+                            // shader 变体」，不是半透明。手和手臂正好挂在这种材质
+                            // 上，而它们的 _DepthWrite=1 是有用的：游戏把 arm 画在
+                            // renderOrder 179、hand 180，头发是 3055 往上，靠这次
+                            // 深度写入才让后画的头发在手臂前面的地方才盖住手臂。
+                            // 关掉它，pl_140000 在 room_idle_L 定格帧上 arm 只有
+                            // 506/8310 个自己的像素到屏幕上（6%），其余被马尾盖掉；
+                            // 打开后是 4017（+3511）—— 截图里「手没了」就是这个。
+                            // 同一帧 chest 掉了 3714，那不是丢东西，正是手臂盖住
+                            // 胸口：游戏把 chest 画在 170、arm 画在 179。
+                            // （.codex-tmp/ab_fleet.py、arm_where.py、
+                            // depth_census.py、shader_depth2.py）
+                            //
+                            // 反过来，身体和头部的 _DepthWrite=0 也是有用的：
+                            // MsbHandler 是一条有序绘制表，不写深度才让共面的刘海
+                            // 盖住脸。所以这里读导出的 userData.depthWrite（
+                            // convert_kirafan_model.alpha_state 现在照 _DepthWrite
+                            // 写），没有这个键的材质（老 GLB、图集材质）退回原来的
+                            // 名字判断。
+                            var matUserData = child.material.userData || {};
+                            var srcDepthWrite = matUserData.depthWrite;
+                            var namedOutline = /_outline$/i.test(child.material.name || "");
+                            var writesDepth = typeof srcDepthWrite === "boolean"
+                                ? srcDepthWrite
+                                : !namedOutline;
                             // 五官的贴花材质是下面那段克隆出来的，会被缓存复用。
                             // 换表情或重新遍历时 child.material 已经是那份克隆，
                             // 这套通用规则会把它的 depthWrite 重新打开，于是修好
@@ -4155,13 +4193,22 @@
                                 // _DstBlend=OneMinusSrcAlpha 一致，排序键回到游戏
                                 // 自己的 renderOrder。
                                 child.material.transparent = false;
-                                // 描边是真半透明的，不能用 alphaTest 切；身体和头部
-                                // 保留游戏的 m_AlphaTestRefValue=0.01。
-                                child.material.alphaTest = blended ? 0 : 0.01;
-                                // 描边按游戏的 _ZWrite=0 不写深度。
-                                child.material.depthWrite = !blended
+                                // alphaTest 只在写深度的材质上是必须的：写深度的
+                                // 网格如果不把空纹素丢掉，那些完全透明的像素也会
+                                // 占住深度，后画的头发就在那里被挡出一块空洞。
+                                // 不写深度的材质没有这个危险，按自己的 alpha 合成
+                                // 即可，边缘更干净。
+                                child.material.alphaTest = writesDepth ? 0.01 : 0;
+                                child.material.depthWrite = writesDepth
                                     && preview.depthWrite !== false;
                                 child.material.depthTest = true;
+                                // depthFunc 保持 three.js 默认的 LessEqualDepth，
+                                // **不要**照 _DepthTest=2（CompareFunction.Less）
+                                // 直译。Unity 的 ZTest 枚举是在它自己的深度约定里
+                                // 说话的（多个后端用反向 Z），数值搬不过来。实测把
+                                // 它改成 THREE.LessDepth，pl_140000 一帧动了
+                                // 110832 个像素 —— 比整个模型的 103533 个可见像素
+                                // 还多，整体还亮了 10 级，层次全乱。
                                 child.material.blending = THREE.CustomBlending;
                                 child.material.blendSrc = THREE.SrcAlphaFactor;
                                 child.material.blendDst =
