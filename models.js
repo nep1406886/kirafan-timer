@@ -112,6 +112,20 @@
     //
     // models.js 是普通脚本不是模块，所以按需 import；拿不到就照旧渲染，
     // 只是黑边还在，不至于整个观察台打不开。
+    // 粒子发射器。演出场景里那 2826 个 peActive 通道，core/uniqueskill.js
+    // 一直解得出来、也一直往 onEmitter 上抛，但没人接 —— 观察台之前连
+    // onEmitter 都没传。core/usparticle.js 按导出的规则真的把粒子画出来。
+    var particleModule = null;
+    function loadParticleModule() {
+        if (!particleModule) {
+            particleModule = import("./core/usparticle.js").catch(function (error) {
+                particleModule = null;
+                throw error;
+            });
+        }
+        return particleModule;
+    }
+
     var fringeModule = null;
     function loadFringeModule() {
         if (!fringeModule) {
@@ -149,8 +163,15 @@
     // 外面那圈；如果只是「不可写」，颜色的推进就被挡在里面，边上自然一点没变。
     // 那份实现不在仓库里（模块根本没读过 emptyDistance，?fringedist= 从 0 到 3
     // 渲出来一模一样），没法直接比对，只能说明现在这版是量过的。
+    // 默认关。上面那张表是在 cutout 下量的 —— 斜坡被按全强度画，唯一能补救的
+    // 办法就是把颜色改了。现在斜坡按自己的 alpha 合成（见下面 blended 那段），
+    // 黑边在源头就没了：en_7000 头部边缘暗像素 2482 → 3，而这套颜色修复只能到
+    // 446，还要付出整体提亮 +18.91 和 188 个麻点 —— 那些麻点是它把画师的银缎带
+    // 和蕾丝往外传出去的结果，正是反馈里「白色麻点/更奇怪」。
+    //
+    // 模块和所有参数都留着：?fringe=1 打开，用来复现上面那些数。
     var FRINGE_QUERY = new URLSearchParams(window.location.search);
-    var FRINGE_DISABLED = FRINGE_QUERY.get("nofringe") === "1";
+    var FRINGE_DISABLED = FRINGE_QUERY.get("fringe") !== "1";
     // ?fringefloor=0.5 改判定线，用来扫参数。斜坡里 alpha 高的那一段可能是
     // 画师真画的柔和过渡，不是合成留下的痕迹，判定线定在哪里得量出来。
     var FRINGE_FLOOR = Number(FRINGE_QUERY.get("fringefloor"));
@@ -1945,6 +1966,32 @@
             // models have), so a node is only hidden when a sibling sharing its
             // base name is present and ranks ahead of it.
 
+            // A few bundles carry whole alternate pose sets as a *prefix* rather
+            // than a suffix. model_en_6000 ships pose1_, pose2_, pose3_, pose4_ and
+            // pose4_5_ copies of most of its body alongside the unprefixed set —
+            // 48 prefixed meshes against 67 plain ones — so the viewer drew up to
+            // five arms out of one shoulder and three weapons across the torso.
+            // That is the crossed-guns screenshot. The suffix loop below never saw
+            // it because the pose token is on the front, so pose1_arm_L and arm_L
+            // hashed to different bases and neither hid the other.
+            //
+            // Prefixed variants rank behind every suffix variant (10 * 1000 beats
+            // the 20 an _open pose scores), which makes the unprefixed set win
+            // outright wherever it exists, and pose1 win among prefixed sets.
+            // Nothing else changes: an unprefixed name still scores exactly what it
+            // scored before, since prefixRank is 0.
+            function enemyPoseSetRank(base) {
+                var match = /^pose(\d+)(?:_(\d+))?_/.exec(base);
+                if (!match) {
+                    return { base: base, prefixRank: 0 };
+                }
+                return {
+                    base: base.slice(match[0].length),
+                    // pose4_5 sorts between pose4 and pose5.
+                    prefixRank: Number(match[1]) * 10 + (match[2] ? Number(match[2]) : 0),
+                };
+            }
+
             function enemyVariantKey(name) {
                 var base = String(name || "").toLowerCase().replace(/_obj$/, "");
                 var rank = 0;
@@ -1962,7 +2009,8 @@
                     rank = Math.max(rank, tokenRank);
                     base = base.slice(0, match.index);
                 }
-                return { base: base, rank: rank };
+                var pose = enemyPoseSetRank(base);
+                return { base: pose.base, rank: pose.prefixRank * 1000 + rank };
             }
 
             // _L / _R is two different things depending on the part. leg_L_A and
@@ -2192,11 +2240,92 @@
                 return match ? match[1] : String(name || "").toLowerCase();
             }
 
+            // Enemies carry their own visibility tracks inside the GLB, one per
+            // clip, written by convert_kirafan_model.add_generic_visibility out of
+            // the same MeigeAnimClip target-type-9 curves the player table uses.
+            // They address this model's own node names, so unlike the player table
+            // there is nothing to reconcile and no variant-set guard to apply: the
+            // clip names every mesh node the model has.
+            //
+            // This replaces guessing. model_en_6000 ships five complete pose sets
+            // active in the prefab and its idle clip switches 83 of 120 nodes off,
+            // including the bat_2a/bat_2b weapons that lie across the torso — a
+            // name rule cannot know that and a geometry rule cannot either, because
+            // both weapons are distinct meshes in distinct places. See
+            // enemyPoseSetRank for why the name-based route was abandoned.
+            var enemyVisibilityClips = null;
+            // 被别的 clip 管、但当前 clip 没提到的节点，默认该藏还是该显。
+            //
+            // Unity 里 GameObject 的可见性跨 clip 保留：换动作不会把 prefab 的
+            // 初始状态放回去。所以作者对一个替身姿势只需在用到它的那个 clip 里
+            // 写轨道，其余 clip 干脆不提——它本来就还是藏着的。en_1300 的
+            // arm_E_L_obj / grip_D_obj 就是这样：idle / abnormal / damage / dead
+            // 四个 clip 完全没有它，charge_skill 则全程钉 0。
+            //
+            // 我们的 viewer 之前把"没有轨道"当成"用 GLB 的默认值"，而模型
+            // bundle 里每个网格都是 active=true，于是这些替身在待机时全画了出来。
+            // 判据只认作者写下的值：凡是管到它的 clip 首帧都是 0 的节点，默认藏。
+            // 任何一个 clip 从第 0 帧就把它开着的，就不动——那是作者要显示的部件。
+            // 全队 539 张表里这条规则只动 8 个模型 32 个节点。
+            var enemyVisibilityDefaults = null;
+
+            function indexEnemyVisibilityNodes(gltf) {
+                enemyVisibilityClips = null;
+                enemyVisibilityDefaults = null;
+                if (modelKind !== "enemy" || !modelObject) {
+                    return;
+                }
+                var table = gltf && gltf.asset && gltf.asset.extras
+                    && gltf.asset.extras.visibility;
+                var clips = table && table.clips;
+                if (!clips || typeof clips !== "object"
+                    || !Object.keys(clips).length) {
+                    return;
+                }
+                enemyVisibilityClips = clips;
+                var wanted = {};
+                var firstValues = {};
+                Object.keys(clips).forEach(function (name) {
+                    Object.keys(clips[name]).forEach(function (node) {
+                        wanted[node.toLowerCase()] = node;
+                        var value = clips[name][node];
+                        var first = Array.isArray(value)
+                            ? (value.length ? value[0][1] : null)
+                            : value;
+                        firstValues[node] = firstValues[node] || [];
+                        firstValues[node].push(first);
+                    });
+                });
+                enemyVisibilityDefaults = {};
+                Object.keys(firstValues).forEach(function (node) {
+                    var allZero = firstValues[node].every(function (v) {
+                        return v === 0;
+                    });
+                    if (allZero) {
+                        enemyVisibilityDefaults[node] = false;
+                    }
+                });
+                modelObject.traverse(function (child) {
+                    if (!child.isMesh) {
+                        return;
+                    }
+                    var key = wanted[String(child.name || "").toLowerCase()];
+                    if (!key) {
+                        return;
+                    }
+                    visibilityNodes[key] = visibilityNodes[key] || [];
+                    visibilityNodes[key].push(child);
+                    // The authored track outranks every heuristic, the same way it
+                    // does for players.
+                    child.userData.visibilityGoverned = true;
+                });
+            }
+
             function indexVisibilityNodes() {
                 // The table is read out of the player animation bundles and its
                 // node names are the player rig's. An enemy that happened to name
                 // a part hat_L would otherwise be switched off by a curve that was
-                // never about it; enemies have their own name-based pass.
+                // never about it; enemies use their own per-GLB tracks instead.
                 if (!VISIBILITY_TABLE || !modelObject || modelKind === "enemy") {
                     return;
                 }
@@ -2223,7 +2352,16 @@
             }
 
             function visibilityTracksFor(clipName) {
-                if (!VISIBILITY_TABLE || !clipName) {
+                if (!clipName) {
+                    return null;
+                }
+                if (enemyVisibilityClips) {
+                    // Borrowed clips (loadEnemyBaseClips) keep the donor's name, and
+                    // the donor's tracks are not about this rig, so a miss returns
+                    // null and selectVisibilityClip leaves the last pose standing.
+                    return enemyVisibilityClips[clipName] || null;
+                }
+                if (!VISIBILITY_TABLE) {
                     return null;
                 }
                 // Class actions share the names idle/attack/class_skill_* across
@@ -2271,7 +2409,13 @@
                     // the right-facing clips ask for hat_L: obeying that would
                     // take away the only hat they have. With nothing to switch
                     // to, the switch is not meaningful — leave it on.
-                    if (visibilitySets[variantSetOf(name)] < 2) {
+                    //
+                    // Enemy tracks are exempt: they come from the model's own clip
+                    // and name every node it has, so a lone node being switched off
+                    // is the authored intent, not a rig mismatch. Applying the guard
+                    // would re-show 83 of model_en_6000's 120 nodes.
+                    if (!enemyVisibilityClips
+                        && visibilitySets[variantSetOf(name)] < 2) {
                         nodes.forEach(function (node) { node.visible = true; });
                         return;
                     }
@@ -2280,16 +2424,36 @@
                         node.visible = visible;
                     });
                 });
+                // 当前 clip 没提到、但别处证明它默认是藏的那些替身。只往"藏"
+                // 一个方向作用：不去强行显示任何东西，所以最坏情况是维持现状,
+                // 不可能因为这条规则删掉一个真部件。
+                if (!enemyVisibilityDefaults) {
+                    return;
+                }
+                Object.keys(enemyVisibilityDefaults).forEach(function (name) {
+                    if (visibilityTracks[name] !== undefined) {
+                        return;
+                    }
+                    var nodes = visibilityNodes[name];
+                    if (!nodes) {
+                        return;
+                    }
+                    nodes.forEach(function (node) {
+                        node.visible = false;
+                    });
+                });
             }
 
             // A model is on screen before any clip is chosen, and for an enemy or
             // a procedural preview no clip is ever chosen. Standing pose first,
             // so the default is never the all-twelve-layers look.
             function applyDefaultVisibility() {
-                if (!VISIBILITY_TABLE) {
+                if (!VISIBILITY_TABLE && !enemyVisibilityClips) {
                     return;
                 }
-                var order = ["room_idle_L", "idle", "battle_run"];
+                var order = enemyVisibilityClips
+                    ? ["idle", "abnormal", "damage"]
+                    : ["room_idle_L", "idle", "battle_run"];
                 for (var i = 0; i < order.length; i += 1) {
                     var tracks = visibilityTracksFor(order[i]);
                     if (tracks) {
@@ -3532,6 +3696,34 @@
                 });
             }
 
+            // 粒子按需挂：没有 extras.emitters 的旧场景就什么也不做，
+            // 载入失败也只是没有粒子，演出照放。
+            function mountParticles(entry, root) {
+                if (!root.userData || !root.userData.emitters
+                    || !root.userData.emitters.length) {
+                    return;
+                }
+                loadParticleModule().then(function (module) {
+                    if (cinematic !== entry || disposed) {
+                        return;
+                    }
+                    var particles = module.createEmitters({
+                        THREE: THREE,
+                        root: root
+                    });
+                    if (!particles) {
+                        return;
+                    }
+                    entry.particles = particles;
+                    entry.pendingEmitters.forEach(function (active, index) {
+                        particles.setActive(index, active);
+                    });
+                    entry.pendingEmitters.clear();
+                }).catch(function (error) {
+                    console.warn("粒子发射器载入失败", error);
+                });
+            }
+
             function mountCinematic(us, timeline, loaded) {
                 var root = loaded.scene;
                 // 时间轴驱动的那台正交相机。orthoSize/354 是引擎自己的换算，
@@ -3581,7 +3773,17 @@
                     camera: stageCamera,
                     audio: us.sceneAudio(cinematicResourceId()),
                     aspect: cinematicAspect(timeline),
-                    onEvent: applyCinematicEvent
+                    onEvent: applyCinematicEvent,
+                    // 通道一开一关就转给粒子系统。模块是异步载入的，来之前
+                    // 落下的那几次开关记在 pendingEmitters 里补上，不然
+                    // 早开的发射器会一直是关的。
+                    onEmitter: function (index, active) {
+                        if (cinematic && cinematic.particles) {
+                            cinematic.particles.setActive(index, active);
+                        } else if (cinematic) {
+                            cinematic.pendingEmitters.set(index, active);
+                        }
+                    }
                 });
                 cinematic = {
                     us: us,
@@ -3590,8 +3792,11 @@
                     player: player,
                     camera: stageCamera,
                     restore: restore,
-                    slot: slot
+                    slot: slot,
+                    particles: null,
+                    pendingEmitters: new Map()
                 };
+                mountParticles(cinematic, root);
                 // 演出的长度由时间轴说，角色动作要跟着它走而不是各跑一套时钟。
                 if (clipByName.skill) {
                     selectAction("skill");
@@ -3690,6 +3895,11 @@
                 }
                 if (shadowObject && previous.restore.shadowVisible !== null) {
                     shadowObject.visible = previous.restore.shadowVisible;
+                }
+                // 粒子的几何和材质是运行时自己建的，不在 GLB 里，
+                // disposeObjectResources 走的是场景树，收不到已经摘下来的那些。
+                if (previous.particles) {
+                    previous.particles.dispose();
                 }
                 scene.remove(previous.root);
                 disposeObjectResources(previous.root);
@@ -3888,6 +4098,33 @@
                             //
                             // Meshes stay double-sided because mirrored left/right
                             // pieces do not share a reliable GLB winding direction.
+                            // 但「不混合」是照抄 Unity 的混合状态，而要复现的是
+                            // Unity 在**一纹素一像素**下的画面。alphaTest 把 0.01
+                            // 以上的纹素一律按全强度画，画师画在斜坡里的 alpha 就
+                            // 丢了；手机上一个纹素约一个像素，那截斜坡被显示网格
+                            // 平均掉，看起来是抗锯齿。这里一个纹素盖 2.75-3.40 个
+                            // 设备像素，同一截斜坡就成了三像素宽的黑边。
+                            //
+                            // 所以按 alpha 混合，剪影不动：alphaTest 仍是 0.01，
+                            // 丢弃集和游戏完全一致，只有留下来的纹素改成按自己的
+                            // alpha 合成。model_en_7000 头部（1024px 渲，同一姿势）：
+                            //   出货 cutout      边缘暗像素 2482   麻点   0
+                            //   加载期颜色修复   边缘暗像素  446   麻点 188
+                            //   按 alpha 混合    边缘暗像素    3   麻点   0
+                            // 降到手机尺度（1024→128 框式降采样，即一纹素一像素）
+                            // 和 cutout 参考比，整体亮度偏移：颜色修复 +18.91（它
+                            // 在改画师的画，那 188 个麻点就是），混合 +1.24。
+                            //
+                            // 当初否掉混合的两条理由都复测了，都不成立：
+                            //   * 「内部实心度崩掉」—— 实测 en_7000 0.977、
+                            //     pl_140007 0.999，掉 2.3% 和 0.1%，不是记下来的
+                            //     11 个点。原因是那次用了 transparent=true。
+                            //   * 「pl_140007 帽檐接缝」—— 那是 transparent=true
+                            //     把网格丢进透明队列按相机距离排序造成的。这里
+                            //     transparent 保持 false，用 CustomBlending：队列
+                            //     和排序键还是游戏自己的 renderOrder，混合方程照样
+                            //     生效。实测 140007 边缘暗像素 529 → 323。
+                            //   （.codex-tmp/blend_ref.py）
                             var blended = /_outline$/i.test(child.material.name || "");
                             // 五官的贴花材质是下面那段克隆出来的，会被缓存复用。
                             // 换表情或重新遍历时 child.material 已经是那份克隆，
@@ -3896,11 +4133,42 @@
                             var isDecal = Boolean(child.material.userData
                                 && child.material.userData.faceDecal);
                             if (!isDecal) {
-                                child.material.transparent = blended;
+                                // transparent 一律留 false —— 包括描边材质。
+                                //
+                                // three.js 把 transparent=true 的物体放进透明队列，
+                                // 而透明队列是在**所有**不透明物体之后画的，
+                                // renderOrder 只在队列内部排序，跨不了队列。游戏是
+                                // 一条 m_HieIndex 序列画到底：pl_180208 的
+                                // hand=2、arm=3、arm_2=4，头发是 13146~106148，
+                                // 所以手臂应该被头发盖住。之前描边走透明队列，这三
+                                // 个网格被画到头发之后，又因为 _ZWrite=0 不写深度，
+                                // 半透明地糊在头发上 —— 截图里「手臂断了」就是这个：
+                                // 一层透空的手臂鬼影压在马尾上，顺序整个倒过来了。
+                                // 实测这一改动只动 696 个像素，但那 696 个占手臂可见
+                                // 面积的 12.5%（手臂单独渲染是 5571 px），而且模型
+                                // 其余部分零变化（.codex-tmp/outline_queue.py、
+                                // hair_over_arm.py）。
+                                //
+                                // CustomBlending 在 transparent=false 下照样生效
+                                // （NormalBlending 会被强制成 NoBlending），所以混合
+                                // 方程和 Unity 的 _SrcBlend=SrcAlpha /
+                                // _DstBlend=OneMinusSrcAlpha 一致，排序键回到游戏
+                                // 自己的 renderOrder。
+                                child.material.transparent = false;
+                                // 描边是真半透明的，不能用 alphaTest 切；身体和头部
+                                // 保留游戏的 m_AlphaTestRefValue=0.01。
                                 child.material.alphaTest = blended ? 0 : 0.01;
+                                // 描边按游戏的 _ZWrite=0 不写深度。
                                 child.material.depthWrite = !blended
                                     && preview.depthWrite !== false;
                                 child.material.depthTest = true;
+                                child.material.blending = THREE.CustomBlending;
+                                child.material.blendSrc = THREE.SrcAlphaFactor;
+                                child.material.blendDst =
+                                    THREE.OneMinusSrcAlphaFactor;
+                                child.material.blendSrcAlpha = THREE.OneFactor;
+                                child.material.blendDstAlpha =
+                                    THREE.OneMinusSrcAlphaFactor;
                             }
                             // alpha-to-coverage 关掉。它本来是想解决"alpha test
                             // 只能保留或丢弃、切出来的边一律是锯齿"，做法是把
@@ -4064,6 +4332,13 @@
                     // model shows one eye/brow/mouth layer and no overlays.
                     if (new URLSearchParams(window.location.search).get("debug") === "1") {
                         window.__modelDebug = modelObject;
+                        // 探针要确认"挂上的确实是我要的那个模型"。先前用的是
+                        // 第一个材质名，但换色变体会沿用基础体的材质名——
+                        // model_en_13302 的材质叫 m_Model_EN_13202，于是 5 个
+                        // 模型被判成挂错而整个跳过审计。这里挂出真正被 fetch
+                        // 的那条 manifest 路径：它是加载器实际请求的 URL，不
+                        // 可能碰巧和请求一致（hash 回退时它会停在旧值）。
+                        window.__modelDebugFile = preview.file;
                         // 渲染质量是靠采样设置决定的，而这些设置只有 renderer
                         // 拿得到。没有这个句柄，A/B 测量只能去截图，而截图是按
                         // CSS 尺寸合成的，浏览器自己的缩放会造出一堆灰阶，把
@@ -4434,18 +4709,33 @@
                                 selectAutomaticFace();
                             });
                     }
-                    hideEnemyDuplicateVariants();
-                    // After the rank pass, so a hat_R that already lost to a
-                    // hat_R_2 is not re-examined, and world matrices are current.
-                    if (modelKind === "enemy") {
-                        modelObject.updateMatrixWorld(true);
-                        facingVariantsHidden = hideEnemyFacingVariants(THREE);
-                    }
                     // Before dedup, so the nodes the table owns are marked and
-                    // dedup leaves them alone.
+                    // dedup leaves them alone. And before the two name-based
+                    // enemy passes, because whether they may run at all depends
+                    // on whether this model brought authored data.
                     indexVisibilityNodes();
-                    // After the name-based enemy pass, so the rank it picked is
-                    // the copy that survives.
+                    indexEnemyVisibilityNodes(gltf);
+                    // 有授权表的敌人不再跑名字/朝向猜测。
+                    //
+                    // 这两条规则是表还不存在时的替代品。表到位之后它们只剩害处：
+                    // 表管到的节点会被 applyVisibilityTracks 覆写，所以猜对了也
+                    // 白费；表没管的节点是「游戏从不切换」的节点，也就是永远显示，
+                    // 于是猜错就是删真零件，而且没人来纠正。
+                    //
+                    // model_en_13703 是量出来的证据：八条 kazehear_* 发丝分布在
+                    // 八个互不相同的 box 上，是八条独立的头发，一条轨道都没有。
+                    // `_2`..`_9` 规则把它们归成一组只留 kazehear_obj，删掉七条。
+                    // 同理 en_2600 的 armor/armor_2（36 和 37 顶点、同一张贴图的
+                    // 两块叠层，7 个 clip 全部同时保留）也曾被削掉一层。
+                    if (!enemyVisibilityClips) {
+                        hideEnemyDuplicateVariants();
+                        // After the rank pass, so a hat_R that already lost to a
+                        // hat_R_2 is not re-examined, and world matrices are current.
+                        if (modelKind === "enemy") {
+                            modelObject.updateMatrixWorld(true);
+                            facingVariantsHidden = hideEnemyFacingVariants(THREE);
+                        }
+                    }
                     duplicateMeshesHidden = hideCoincidentDuplicates(modelObject);
                     applyDefaultVisibility();
                     applyEnemyVisualState("idle");
@@ -4869,6 +5159,11 @@
                     // 卡在动作上的。
                     if (motionEnabled) {
                         cinematic.player.update(delta * playbackRate);
+                        // 粒子跟着同一条时钟。暂停时不推进 —— 它是有历史的
+                        // 模拟，不像可见性那样能按帧算出来。
+                        if (cinematic.particles) {
+                            cinematic.particles.update(delta * playbackRate);
+                        }
                     }
                     syncClipToCinematic();
                     renderCinematicFrame();

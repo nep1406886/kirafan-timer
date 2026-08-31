@@ -19,7 +19,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_compl
 from pathlib import Path
 from typing import Any
 
-from convert_kirafan_model import KirafanExporter
+from convert_kirafan_model import ENEMY_VISIBILITY_DONORS, KirafanExporter
 
 
 DATABASE_URL = "https://database.kirafan.cn/assetBundle.json"
@@ -374,14 +374,34 @@ def main() -> None:
                 raise RuntimeError(f"Animation bundle missing from index: {name}")
             download(asset_url(entry), animation_dir / Path(name).name)
     enemy_animation_entries = []
+    seen_animations: set[str] = set()
     for entry in selected:
         if not entry["name"].startswith("model/enemy/model_en_"):
             continue
         match = Path(entry["name"]).stem.removeprefix("model_en_")
-        animation_name = f"anim/enemy/common_en_{match}.muast"
-        animation_entry = by_name.get(animation_name)
-        if animation_entry is not None:
-            enemy_animation_entries.append(animation_entry)
+        wanted = [f"anim/enemy/common_en_{match}.muast"]
+        # Only 139 of the 604 enemies have a bundle of their own; the rest are
+        # rank/recolour variants that borrow the same-family base's clips at
+        # runtime and, since convert_kirafan_model.enemy_base_animation_bundle
+        # added it, its GameObject-visibility tracks at export.  Fetch the base
+        # bundle too, or a rebuild of just the variants has nothing to read the
+        # tracks out of and they silently ship with every alternate shell on
+        # screen.
+        if len(match) > 2 and match[:-2] + "00" != match:
+            wanted.append(f"anim/enemy/common_en_{match[:-2]}00.muast")
+        # Six families have no bundle under either name and borrow a measured
+        # same-rig donor instead; fetch that too, for the same reason.
+        for key in (match, match[:-2] + "00"):
+            donor = ENEMY_VISIBILITY_DONORS.get(key)
+            if donor:
+                wanted.append(f"anim/enemy/{donor}")
+        for animation_name in wanted:
+            if animation_name in seen_animations:
+                continue
+            animation_entry = by_name.get(animation_name)
+            if animation_entry is not None:
+                seen_animations.add(animation_name)
+                enemy_animation_entries.append(animation_entry)
     if enemy_animation_entries:
         with ThreadPoolExecutor(max_workers=min(8, len(enemy_animation_entries))) as executor:
             futures = [

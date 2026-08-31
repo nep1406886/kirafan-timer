@@ -20,7 +20,7 @@ from typing import Any, Iterable
 
 import numpy as np
 import UnityPy
-from PIL import Image
+from PIL import Image, ImageChops
 from UnityPy.helpers.MeshHelper import MeshHandler
 
 
@@ -32,6 +32,39 @@ TARGET_ELEMENT_ARRAY_BUFFER = 34963
 # MsbMaterialHandler.MsbMaterialParam.m_AlphaTestRefValue, which every bundle
 # sampled so far leaves at its 0.01f default.
 ALPHA_TEST_REF = 0.01
+# Six enemies ship no anim bundle of their own and none under the family-base name
+# either, yet still draw several pose sets at once.  Each borrows from the bundle
+# below, and every entry is a measurement rather than a naming guess:
+#
+#   4300 <- 1700   all 122 nodes match name *and* (vertices, triangles); it is en_1700
+#                  recoloured.  Was the fleet's worst model at 10 twin pairs and 8
+#                  coincident pairs, its L_* and R_* pose sets both on screen.
+#   7700 <- 5700   41/41 exact.  Fixes Serif_1_obj against Serif_2_obj at IoU 1.0.
+#   8100 <- 5600   30/30 exact.  Fixes arm_R_A_under_obj against arm_R_under_B_obj.
+#   8400 <- 8300   51/51 exact.
+#   6300 <- 3800   25 of 26 exact, head_obj alone differs -- same body, different face.
+#  13300 <- 13200  41 shared names all topology-identical, and common_en_13200 carries
+#                  tracks for en_13300's *own* Ax_hand_open_* nodes, so the bundle was
+#                  authored for both weapon variants.  Fixes arm_R_obj against
+#                  Slash1_arm_R_obj at IoU 1.0 across 13300-13305.
+#
+# Rejected candidates are as informative: the remaining tableless enemies scored at or
+# below 0.65 weighted coverage of their switchable names, or tied between bundles that
+# disagreed on what to hide.  Borrowing on a coin flip risks deleting a real part, and
+# the ones refused are all small rigs the fleet audit found clean anyway.
+ENEMY_VISIBILITY_DONORS = {
+    "4300": "common_en_1700.muast",
+    "6300": "common_en_3800.muast",
+    "7700": "common_en_5700.muast",
+    "8100": "common_en_5600.muast",
+    "8400": "common_en_8300.muast",
+    "13300": "common_en_13200.muast",
+}
+
+# MeigeAnimClip.m_AnimNodeHandlerArray[].m_Target.m_TargetType.  9 is the
+# GameObject-visibility track; the transform tracks stay in the Unity
+# AnimationClip beside it.  Same constant as build_visibility_table.py.
+TARGET_TYPE_VISIBILITY = 9
 
 
 def pptr_id(value: Any) -> int:
@@ -335,10 +368,42 @@ class KirafanExporter:
         LANCZOS is not used: it keeps the gradient as steep as NEAREST (0.2228
         vs 0.2140, against BILINEAR's 0.1686) because it rings, and ringing on
         an alpha matte punches pinholes and haloes.
+
+        The upscale is then gated on the source matte.  Interpolating outward
+        from a source texel the artist left at alpha 0 lifts its neighbours above
+        the 0.01 cutoff, and alphaMode MASK draws every surviving texel at full
+        strength -- so those texels show whatever filler the colour atlas happens
+        to hold outside the painted area.  Measured on model_en_7000's main
+        atlas, the ungated upscale invents 13481 such texels (5.1% of the atlas):
+        mean luminance 29.6 against 196.7 for the opaque body beside them, 12413
+        of them darker than that body by more than 24 levels.  At this viewer's
+        magnification (one atlas texel spans 2.75-3.40 device pixels) a
+        one-texel band is a three-pixel black outline, which is what "黑边很重"
+        reported.  Gating restores NEAREST's silhouette (157030 kept texels
+        against 155968) while keeping BILINEAR's ramp: gradient over the painted
+        edge band is 0.1873, against BILINEAR's 0.1810 and NEAREST's 0.2071.  Of
+        the texels it drops, only 569 were within 24 levels of the body colour,
+        so it is filler that goes, not authored detail (.codex-tmp/gate_sim.py).
+
+        The darkness that remains inside the painted ramp is authored -- 71529
+        texels here, and rgb/alpha does not recover the body colour from them
+        (residual 96-143, .codex-tmp/premul.py), so the atlas is not simply
+        premultiplied.  That band is repaired at load time instead; see
+        core/texture-fringe.js.
+
+        The gate only applies when the alpha layer is being magnified.  Some
+        materials pair a tiny colour map with the full-size alpha atlas
+        (model_en_7000's _flash is 4x4 RGB against 256x256 alpha), and there
+        NEAREST is not a matte at all -- it point-samples 16 of 65536 texels, so
+        gating on it zeroed 6 of the 16 for no reason.
         """
         if alpha.size == size:
             return alpha
-        return alpha.resize(size, Image.Resampling.BILINEAR)
+        smooth = alpha.resize(size, Image.Resampling.BILINEAR)
+        if size[0] <= alpha.size[0] and size[1] <= alpha.size[1]:
+            return smooth
+        matte = alpha.resize(size, Image.Resampling.NEAREST)
+        return ImageChops.multiply(smooth, matte.point(lambda v: 255 if v else 0))
 
     def add_materials(self) -> dict[str, int]:
         textures: dict[str, Image.Image] = {}
@@ -771,15 +836,153 @@ class KirafanExporter:
         match = re.search(r"model_en_(\d+)\.muast$", self.model_bundle.name, re.IGNORECASE)
         if not match:
             return
-        bundle = self.animation_dir / f"common_en_{match.group(1)}.muast"
-        if not bundle.is_file():
+        identifier = match.group(1)
+        bundle = self.animation_dir / f"common_en_{identifier}.muast"
+        if bundle.is_file():
+            clips = self.load_clips(bundle.name)
+            for clip_name, clip in clips.items():
+                animation = {"name": clip_name, "samplers": [], "channels": []}
+                self.add_clip_channels(animation, clip, "generic")
+                if animation["channels"]:
+                    self.builder.document["animations"].append(animation)
+        # 465 of the 604 enemies are rank/recolour variants with no anim bundle of
+        # their own (10001..10005 sit off 10000), and the viewer already borrows
+        # their *clips* from the base model at runtime (enemyBaseActionSource).  The
+        # visibility tracks address nodes by name and 361 of 451 variants have a node
+        # set identical to their base, 49 a subset, and the remaining 41 differ only
+        # by an authoring typo (era_L_obj against ear_L_obj), so the base's tracks
+        # apply unchanged -- add_generic_visibility keeps only names this GLB has, so
+        # a name the variant lacks is simply not switched.
+        source = bundle if bundle.is_file() else self.enemy_base_animation_bundle(identifier)
+        if source is None:
+            donor = ENEMY_VISIBILITY_DONORS.get(identifier)
+            if donor:
+                candidate = self.animation_dir / donor
+                source = candidate if candidate.is_file() else None
+        if source is not None:
+            self.add_generic_visibility(source)
+
+    def enemy_base_animation_bundle(self, identifier: str) -> Path | None:
+        """The same-family base bundle, matching models.js enemyBaseActionSource."""
+        if len(identifier) <= 2:
+            return None
+        base = identifier[:-2] + "00"
+        if base == identifier:
+            return None
+        candidate = self.animation_dir / f"common_en_{base}.muast"
+        if candidate.is_file():
+            return candidate
+        donor = ENEMY_VISIBILITY_DONORS.get(base)
+        if donor:
+            candidate = self.animation_dir / donor
+            if candidate.is_file():
+                return candidate
+        return None
+
+    # Enemy bundles ship every mesh with m_IsActive true and carry no clips of
+    # their own, so a straight export puts every alternate shell on screen at
+    # once.  model_en_6000 draws five complete pose sets simultaneously -- five
+    # arms out of one shoulder, three weapons across the torso -- and en_14405
+    # stacks arm_L_1 on arm_L_2.
+    #
+    # The switch is in the anim bundle this method already opened for the
+    # transform curves: MeigeAnimClip.m_AnimNodeHandlerArray, target type 9, the
+    # same GameObject-visibility track build_visibility_table.py publishes for
+    # players.  en_6000's idle clip carries a track for all 120 mesh nodes and
+    # holds pose1_shoulder_ribon_L_obj at 0 from frame 0 to frame 64.
+    #
+    # This is worth insisting on because the alternative was guessing from names,
+    # and a census over all 604 enemies showed names cannot decide it: the tokens
+    # that mark a variant (`slash1`, `flip`, `copy`, `eye_angry`) are shaped
+    # exactly like the tokens that mark a real part (`body_back`, `nose_ring`,
+    # `tail_tip`, `chest_line`), and the numbered suffix is ambiguous in both
+    # directions -- en_14405's arm_L_1/arm_L_2 are stacked alternates 0.001 of a
+    # diagonal apart, while en_13703's kazehear_2..6 are five separate wind-hair
+    # strands spread over 0.264.  Geometry cannot separate a 3-layer shoulder pad
+    # from 3 alternate shoulder pads either.  The clip can, because it is what the
+    # game itself plays.
+    #
+    # glTF has no node-visibility channel, so the tracks ride in the animation's
+    # own extras: {node name: 0 | 1 | [[frame, value], ...]}.  A constant curve
+    # collapses to one number, which is the common case.  Stepped keys
+    # (m_CtrlType 2) hold the last value, so the viewer must not interpolate.
+    def add_generic_visibility(self, bundle: Path) -> None:
+        tracks = self.load_visibility_tracks(bundle)
+        if not tracks:
             return
-        clips = self.load_clips(bundle.name)
-        for clip_name, clip in clips.items():
-            animation = {"name": clip_name, "samplers": [], "channels": []}
-            self.add_clip_channels(animation, clip, "generic")
-            if animation["channels"]:
-                self.builder.document["animations"].append(animation)
+        # Mesh-bearing nodes only.  Restricting to these keeps a bone that happens
+        # to share a mesh's name out of the table, and the viewer only ever applies
+        # the table to meshes anyway.
+        known = {str(node.get("name") or "")
+                 for node in self.builder.document.get("nodes", [])
+                 if "mesh" in node}
+        published: dict[str, dict[str, Any]] = {}
+        for clip_name, clip in tracks.items():
+            # Only nodes this GLB actually has: the clip also addresses effect
+            # objects (EN_flash, blur_1) the export drops, and a borrowed base
+            # bundle names parts the variant renamed (ear_L_obj against era_L_obj).
+            kept = {name: value for name, value in clip.items() if name in known}
+            if kept:
+                published[clip_name] = kept
+        if not published:
+            return
+        # The table goes on asset.extras, keyed by clip name, rather than on each
+        # animation's extras.  The 465 variant enemies carry no animations of their
+        # own -- they borrow the base model's clips at runtime -- so per-animation
+        # extras would have nothing to attach to and the variant would get no table
+        # at all.  Keyed by clip name it works either way, because a borrowed clip
+        # keeps the donor's name.
+        asset_extras = self.builder.document["asset"].setdefault("extras", {})
+        asset_extras["visibility"] = {
+            "source": ("MeigeAnimClip.m_AnimNodeHandlerArray target type 9; "
+                       "value 1 = visible, keys are stepped, hold the last key"),
+            "bundle": bundle.name,
+            "clips": published,
+        }
+
+    @staticmethod
+    def load_visibility_tracks(bundle: Path) -> dict[str, dict[str, Any]]:
+        """{exported clip name: {node: 0 | 1 | [[frame, value], ...]}}."""
+        environment = UnityPy.load(str(bundle))
+        clips: dict[str, dict[str, Any]] = {}
+        for item in environment.objects:
+            if item.type.name != "MonoBehaviour":
+                continue
+            try:
+                tree = item.read_typetree()
+            except Exception:
+                continue
+            meige = tree.get("m_MeigeAnimClip")
+            if not isinstance(meige, dict):
+                continue
+            handlers = meige.get("m_AnimNodeHandlerArray") or []
+            tracks: dict[str, Any] = {}
+            for handler in handlers:
+                target = handler.get("m_Target") or {}
+                if target.get("m_TargetType") != TARGET_TYPE_VISIBILITY:
+                    continue
+                name = str(target.get("m_TargetName") or "")
+                if not name:
+                    continue
+                keys: list[list[float]] = []
+                for curve in handler.get("m_Curves") or []:
+                    for component in curve.get("m_ComponentCurves") or []:
+                        for key in component.get("m_KeyDatas") or []:
+                            keys.append([
+                                round(float(key["m_Frame"]), 3),
+                                1 if float(key["m_Value"]) >= 0.5 else 0,
+                            ])
+                if not keys:
+                    continue
+                keys.sort(key=lambda item: item[0])
+                values = {value for _, value in keys}
+                tracks[name] = keys[0][1] if len(values) == 1 else keys
+            if not tracks:
+                continue
+            clip_name = str(meige.get("m_Name") or "")
+            exported = clip_name.split("@", 1)[-1] if "@" in clip_name else clip_name
+            clips.setdefault(exported, {}).update(tracks)
+        return clips
 
     def add_clip_channels(self, animation: dict[str, Any], clip: dict[str, Any], kind: str) -> None:
         for curves, target_path, width in (
