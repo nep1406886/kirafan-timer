@@ -287,6 +287,35 @@ class KirafanExporter:
         return None
 
     def read_render_orders(self) -> dict[str, int]:
+        """Flatten the game's three draw keys into one glTF renderOrder.
+
+        MsbHandler sorts by m_eRenderStage first, then m_RenderOrder, then
+        m_HieIndex.  The stage used to be dropped here, and that is wrong for
+        every player: a player ships TWO MsbHandler behaviours, one on
+        Model_*_body(Clone) and one on Model_*_head(Clone), each numbering its
+        own entries from zero.  Merging them on m_RenderOrder alone invents an
+        ordering between the two groups that the game never had, because their
+        ranges overlap -- pl_100001 is body 0..25 against head 1..26.
+
+        What that cost: pl_100001's hat_L/hat_R are stage 7 with
+        m_RenderOrder=20, and its L30_face is stage 22 with m_RenderOrder=6.
+        The game draws stage 7 first, so the hat goes UNDER the face.  Flattened
+        without the stage the hat became 20169 against the face's 6070 and
+        painted over it, leaving 23 of the face's 12929 pixels -- a faceless
+        Yuno.  Honouring the stage puts the face back at 3630 px, the eyes at
+        1598 and the backhead at 2894, and moves no limb pixel at all
+        (.codex-tmp/stage_ab.py, msb_lists.py, render_stage.py).
+
+        Only three stages are in use.  Stage 7 is the depth-writing shells --
+        arm, hand, chest, hat, cape, glove, weapons; stage 21 appears on 18
+        enemies' body/leg/eye meshes; stage 22 is everything else, 1921 of the
+        first 1965 meshes counted.  Enemies carry a single handler, so the stage
+        only ever reorders them when one model mixes stages.
+
+        The multipliers hold: over 400 bundles the maxima are m_HieIndex 137 and
+        m_RenderOrder 106, both far inside the 1000 each key is given
+        (.codex-tmp/order_range.py, stage_census.py).
+        """
         result: dict[str, int] = {}
         for item in self.environment.objects:
             if item.type.name != "MonoBehaviour":
@@ -296,12 +325,16 @@ class KirafanExporter:
                 if behaviour.m_Script.read().m_Name != "MsbHandler":
                     continue
                 for entry in item.read_typetree().get("m_MsbObjectHandlerArray", []):
+                    source = entry["m_Src"]
                     # Msb renders lower orders first and uses the hierarchy index
                     # as the stable order for pieces sharing the same layer.  The
                     # latter matters for overlapping hands, sleeves, and clothing.
-                    render_order = int(entry["m_Src"]["m_RenderOrder"])
+                    stage = int(source.get("m_eRenderStage") or 0)
+                    render_order = int(source["m_RenderOrder"])
                     hierarchy_index = max(0, int(entry.get("m_HieIndex", 0)))
-                    result[entry["m_Name"]] = render_order * 1000 + hierarchy_index
+                    result[entry["m_Name"]] = (stage * 1000000
+                                               + render_order * 1000
+                                               + hierarchy_index)
             except Exception:
                 continue
         return result
