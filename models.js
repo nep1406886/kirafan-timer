@@ -4360,6 +4360,19 @@
                             // (m_eRenderStage 7 draws behind the body), and as the
                             // tie-break the engine authored via m_HieIndex.
                             child.renderOrder = resolveRenderOrder(child);
+                            // MsbHandler 的 m_Src.m_bVisibility：导出器以前完全
+                            // 没读这个字段，所以游戏本来关掉的网格我们照画。
+                            // 它很少但很具体：60 个包 6646 条里只有 23 条是 0，
+                            // 全在敌人身上 —— 六个模型的 `EN_flash`、
+                            // `EN_blur_1/2/3`，以及 en_1000 那 18 个备用手套、
+                            // 手、嘴、眉毛和受伤眼。一张受击闪光片被永久画在
+                            // 身上，正是「闪烁」的样子；blur 壳就是「黑边很重」。
+                            // 注意它不是换装开关：pl_140000 全部 228 条都是 1，
+                            // 所以内层衬衣被 cloth_B 盖住跟这个字段无关
+                            // （.codex-tmp/vis_flag.py、msb_fields.py）。
+                            if (child.userData && child.userData.msbVisible === false) {
+                                child.visible = false;
+                            }
                             // Skinned vertices follow their bones, but frustum
                             // culling uses the node's bounding sphere, which
                             // stays at the skeleton origin for these exports —

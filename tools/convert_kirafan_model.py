@@ -249,6 +249,9 @@ class KirafanExporter:
         self.node_for_transform: dict[int, int] = {}
         self.path_maps: dict[str, dict[str, int]] = {"body": {}, "head": {}, "generic": {}}
         self.skin_cache: dict[tuple[Any, ...], int] = {}
+        # Filled as a side effect of read_render_orders(): both live on the same
+        # MsbHandler entry, so reading them together costs one pass.
+        self.hidden_meshes: set[str] = set()
         self.render_orders = self.read_render_orders()
         root_names = [self.object_name(transform).lower() for transform in self.transforms.values()]
         texture_names = [
@@ -315,6 +318,20 @@ class KirafanExporter:
         The multipliers hold: over 400 bundles the maxima are m_HieIndex 137 and
         m_RenderOrder 106, both far inside the 1000 each key is given
         (.codex-tmp/order_range.py, stage_census.py).
+
+        Caveat on the stage, recorded because the claim above is stronger than
+        the evidence: "the game draws stage 7 first" was inferred from the
+        hat/face case alone and is not right for every mesh.  Stage 7 holds the
+        shells -- {chest, arm, hand} on pl_140000, plus hat_L/hat_R on
+        pl_100001 -- and no global direction satisfies both models: stage 7
+        first gives pl_100001 its face back (4823 px) but leaves pl_140000's
+        inner blouse at 0 px, while stage 7 last reverses both exactly.  Forcing
+        every stage-7 mesh to write depth changes nothing either.  For the
+        blouse the order is faithful regardless: pl_140000's torso runs blouse 0
+        -> band 10,11 -> skirt 15,16 -> coat 17,18,19 -> tie 20,21, inside out,
+        so the innermost layer is meant to be covered.  What remains unexplained
+        is pl_100001's hat, which loses 17445 px under stage-first
+        (.codex-tmp/stage_dir.py, stage_depth.py, msb_fields.py).
         """
         result: dict[str, int] = {}
         for item in self.environment.objects:
@@ -335,9 +352,31 @@ class KirafanExporter:
                     result[entry["m_Name"]] = (stage * 1000000
                                                + render_order * 1000
                                                + hierarchy_index)
+                    if source.get("m_bVisibility") in (0, False):
+                        self.hidden_meshes.add(entry["m_Name"])
             except Exception:
                 continue
         return result
+
+    def read_hidden_meshes(self) -> set[str]:
+        """Meshes MsbHandler ships switched off, from m_Src.m_bVisibility.
+
+        This flag sits on the same entry as m_RenderOrder and m_eRenderStage and
+        was simply never read, so every mesh the game hides was drawn anyway.
+        It is rare and specific: over 60 bundles, 23 of 6646 entries carry 0.
+        All 23 are enemies -- `EN_flash` on six models, `EN_blur_1/2/3`, and
+        en_1000's eighteen alternate gloves, hands, mouths, eyebrows and damage
+        eyes.  A hit-flash quad drawn permanently is exactly what reads as a
+        flickering white overlay, and the blur shells are what read as heavy
+        black edging.
+
+        It is not, however, an outfit switch: all 228 of pl_140000's entries are
+        flagged visible, so this does not govern the cloth_B shells over that
+        model's inner blouse (.codex-tmp/vis_flag.py, msb_fields.py).
+        """
+        if not hasattr(self, "hidden_meshes"):
+            self.hidden_meshes = set()
+        return self.hidden_meshes
 
     def add_hierarchy(self) -> None:
         for transform_id, transform in self.transforms.items():
@@ -752,6 +791,8 @@ class KirafanExporter:
         node = self.builder.document["nodes"][self.node_for_transform[transform.object_reader.path_id]]
         node["mesh"] = len(self.builder.document["meshes"]) - 1
         node["extras"] = {"renderOrder": self.render_orders.get(mesh.m_Name, 0)}
+        if mesh.m_Name in self.hidden_meshes:
+            node["extras"]["msbVisible"] = False
 
     def add_skinned_renderer(self, renderer: Any, transform: Any, kind: str, material: int) -> None:
         if not pptr_id(renderer.m_Mesh):
@@ -815,6 +856,8 @@ class KirafanExporter:
         node["mesh"] = mesh_index
         node["skin"] = skin_index
         node["extras"] = {"renderOrder": self.render_orders.get(mesh.m_Name, 0)}
+        if mesh.m_Name in self.hidden_meshes:
+            node["extras"]["msbVisible"] = False
         face_part = self.face_part(renderer.m_GameObject.read().m_Name)
         if face_part:
             node["extras"]["facePart"] = face_part
