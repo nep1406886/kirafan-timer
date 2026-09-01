@@ -3422,8 +3422,12 @@
                                         return;
                                     }
                                     var side = /_L$/i.test(part.name) ? "L" : "R";
-                                    var socket = modelObject.getObjectByName("Loc_" + side)
-                                        || modelObject.getObjectByName("Weapon_" + side);
+                                    // Weapon_R 是握持点，Hand_R 下偏移 +0.02961、旋转恒等；
+                                    // Loc_R 是效果生成点，法师职业 idle 里飞 0.21 半径弧、
+                                    // 自转一圈 —— 和 EN_flash/EN_blur 一样的动画定位器，不
+                                    // 是实体挂点。优先取握持点，否则武器跟着轨道飞。
+                                    var socket = modelObject.getObjectByName("Weapon_" + side)
+                                        || modelObject.getObjectByName("Loc_" + side);
                                     if (!socket) {
                                         return;
                                     }
