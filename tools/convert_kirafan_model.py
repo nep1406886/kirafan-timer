@@ -9,6 +9,7 @@ and alpha atlases, and merges matching body/head AnimationClips.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import io
 import json
@@ -273,6 +274,12 @@ class KirafanExporter:
             self.mode = "skinned"
         else:
             self.mode = "static"
+        # {material path_id: {depth_write: glTF material index}}, filled by
+        # add_generic_materials() from material_depth_groups.  add_meshes() and
+        # add_generic_meshes() resolve through renderer_material() to hand each
+        # mesh the variant matching its own render stage.
+        self.material_variants: dict[int, dict[bool, int]] = {}
+        self.material_depth_groups = self.read_material_depth_groups()
 
     @staticmethod
     def object_name(transform: Any) -> str:
@@ -319,19 +326,34 @@ class KirafanExporter:
         m_RenderOrder 106, both far inside the 1000 each key is given
         (.codex-tmp/order_range.py, stage_census.py).
 
-        Caveat on the stage, recorded because the claim above is stronger than
-        the evidence: "the game draws stage 7 first" was inferred from the
-        hat/face case alone and is not right for every mesh.  Stage 7 holds the
-        shells -- {chest, arm, hand} on pl_140000, plus hat_L/hat_R on
-        pl_100001 -- and no global direction satisfies both models: stage 7
-        first gives pl_100001 its face back (4823 px) but leaves pl_140000's
-        inner blouse at 0 px, while stage 7 last reverses both exactly.  Forcing
-        every stage-7 mesh to write depth changes nothing either.  For the
-        blouse the order is faithful regardless: pl_140000's torso runs blouse 0
-        -> band 10,11 -> skirt 15,16 -> coat 17,18,19 -> tie 20,21, inside out,
-        so the innermost layer is meant to be covered.  What remains unexplained
-        is pl_100001's hat, which loses 17445 px under stage-first
-        (.codex-tmp/stage_dir.py, stage_depth.py, msb_fields.py).
+        The stage is used exactly as authored, in both directions, because the
+        question "which way does stage 7 go" has no global answer and the
+        premise behind asking it was wrong.  Stage 7 holds the shells -- {chest,
+        arm, hand} on pl_140000, plus hat_L/hat_R on pl_100001 -- and every
+        reweighting tried so far traded one model for another: stage-7-first
+        leaves pl_140000's inner shirt covered, stage-7-last cost 11 of 20
+        sampled players their face to their own arm (.codex-tmp/
+        regress_sample.py), and narrowing that to names 'chest'/'hat_*' only made
+        the same mistake on fewer models.
+
+        No rule keyed on this table can do better, because the table does not
+        carry the distinction: on pl_140000 `chest` and `arm` agree in every draw
+        key MsbHandler ships -- stage 7, m_RenderOrder 0, m_bVisibility 1 -- and
+        differ only in m_HieIndex (170 vs 179).  A name test does not read
+        authored data, it invents a "garment vs limb" split the data never makes.
+
+        The shirt being covered is authored, not a defect.  `chest` carries
+        _DepthWrite=0, so it writes no depth and the later-drawn coat paints over
+        it in the game too; and raycasting the pixels a stage-7 -> 30 move
+        changes shows `chest` is the front-most surface at only 59% of them,
+        with cloth_A_1/cloth_A_2/tie_top/tie_under genuinely nearer at the rest
+        (median gap .008-.015), so drawing the shirt later puts it over the
+        necktie.  pl_140000's torso reads inside-out by design: blouse 0 -> band
+        10,11 -> skirt 15,16 -> coat 17,18,19 -> tie 20,21.
+
+        Still unexplained, and deliberately left alone rather than papered over:
+        pl_100001's hat loses 17445 px under stage-first (.codex-tmp/
+        stage_dir.py, stage_depth.py, msb_fields.py, depth_test.py).
         """
         result: dict[str, int] = {}
         for item in self.environment.objects:
@@ -349,6 +371,26 @@ class KirafanExporter:
                     stage = int(source.get("m_eRenderStage") or 0)
                     render_order = int(source["m_RenderOrder"])
                     hierarchy_index = max(0, int(entry.get("m_HieIndex", 0)))
+                    # m_eRenderStage is used as authored, with no reweighting.
+                    # Three reweightings were tried and each was wrong: drawing
+                    # stage 7 last cost 11 of 20 sampled models their face to
+                    # their own arm, and restricting that to names 'chest'/'hat_*'
+                    # only narrowed the same mistake.  The authored data gives no
+                    # basis for either: on pl_140000 `chest` and `arm` are
+                    # identical in every draw key MsbHandler ships (stage 7,
+                    # m_RenderOrder 0, m_bVisibility 1), differing only in
+                    # m_HieIndex, so no rule keyed on this table can separate
+                    # "garment that should be covered" from "limb that should
+                    # cover" -- a name test just invents the distinction.
+                    # Raycasting the pixels a stage-7 -> 30 move changes on
+                    # pl_140000 settles it: `chest` is the front-most surface at
+                    # only 59% of them, while cloth_A_1/cloth_A_2/tie_top/
+                    # tie_under are genuinely nearer at the other 41% (median gap
+                    # .008-.015), so moving the shirt later paints it over the
+                    # necktie and coat panels.  The coat covering the shirt is
+                    # authored, not a bug: `chest` carries _DepthWrite=0, so the
+                    # game also lets the later-drawn coat paint over it
+                    # (.codex-tmp/depth_test.py, look_at_shirt.py).
                     result[entry["m_Name"]] = (stage * 1000000
                                                + render_order * 1000
                                                + hierarchy_index)
@@ -524,8 +566,42 @@ class KirafanExporter:
             floats[key if isinstance(key, str) else key.name] = float(value)
         return floats
 
+    @staticmethod
+    def depth_write_for_stage(stage: int) -> bool:
+        """Depth write for a mesh at m_eRenderStage `stage`, per the game.
+
+        Straight out of MsbObjectHandler.Init() in the decompiled client
+        (gitlab.com/kirafan/game-source, Assembly-CSharp/MsbObjectHandler.cs):
+        for every material of every msb object it branches on the *stage* and
+        overwrites the material's depth state before anything renders --
+
+            PunchThrough_Higher..Lower (10..14):
+                SetDepthTest(Less); SetEnableDepthWrite(true);  SetEnableAlphaTest(true)
+            Alpha_Higher..Lower (20..24):
+                SetDepthTest(Less); SetEnableDepthWrite(false); SetEnableAlphaTest(false)
+            everything else (includes Opaque_Higher..Lower, 5..9):
+                SetDepthTest(Less); SetEnableDepthWrite(true);  SetEnableAlphaTest(false)
+
+        and SetEnableDepthWrite writes the shader property named DepthWrite,
+        i.e. `_DepthWrite` itself.  So the asset's _DepthWrite is an authoring
+        default the runtime discards; the stage is what decides.
+
+        This is what the stage numbers mean, from Meige/eRenderStage.cs by
+        ordinal: 7 is eRenderStage_Opaque and 22 is eRenderStage_Alpha.  The
+        pair is a pass split, not a layer index -- opaque draws writing depth,
+        then alpha draws depth-tested against it.  Which is why pl_140000's
+        shirt belongs on screen: `chest` sits at stage 7 and writes depth, so
+        the stage-22 coat panels drawn afterwards are rejected wherever the
+        shirt is nearer, and the open blazer shows the blouse.
+        """
+        if 10 <= stage <= 14:
+            return True
+        if 20 <= stage <= 24:
+            return False
+        return True
+
     @classmethod
-    def alpha_state(cls, material: Any) -> dict[str, Any]:
+    def alpha_state(cls, material: Any, depth_write: bool | None = None) -> dict[str, Any]:
         """Translate a Unity material's blend floats into glTF alpha state.
 
         Every character material in the fleet is drawn by one of two shaders --
@@ -546,26 +622,31 @@ class KirafanExporter:
         disagreed with _DepthWrite 1455 times and agreed 24 (.codex-tmp/
         depth_census.py, shader_depth2.py).
 
-        The depth state is the half that shows.  The 1403 plain materials read
-        _DepthWrite=0: they do not write depth, and MsbHandler's ordered draw
-        list alone decides who covers whom -- which is what lets front hair paint
-        over a face it is coplanar with.  The 52 materials that read
-        _DepthWrite=1 are mostly the ones carrying arms and hands, and their
-        depth write is load-bearing: they are drawn very early (pl_140000 puts
-        `arm` at renderOrder 179 and `hand` at 180, against 3055 and up for
-        hair), so without it the hair drawn afterwards paints over the arm even
-        where the arm is nearer the camera.  Measured on model_pl_140000 frozen
-        in room_idle_L, that left 506 of the arm's 8310 own pixels on screen --
-        6%, the rest replaced by twin-tails; reading _DepthWrite instead brings
-        it to 4017.  Across five models the limb group gains every time (+4648,
-        +3458, +860, +910, +747) while hair loses, the largest single loser being
-        pl_180208's L30_hair_back_A at -2820 -- *back* hair that had been
-        punching through the torso (.codex-tmp/ab_fleet.py, arm_where.py).
+        The blend half is still read here.  The depth half is NOT: it comes from
+        depth_write_for_stage(), because MsbObjectHandler.Init() overwrites
+        _DepthWrite from the mesh's render stage before anything draws, so the
+        asset value is an authoring default the game discards.  Reading the
+        asset value put 1403 materials at _DepthWrite=0 including `chest`, which
+        is stage 7 (Opaque) and does write depth in the game -- that single
+        mis-read is why pl_140000's blouse never appeared inside its open
+        blazer, and no amount of reordering could fix it because the missing
+        piece was the depth buffer, not the draw list.
 
-        The material name is not a usable proxy for any of this: 29 of the 52
-        depth-writing materials are plainly named, and 15 `_flash` materials read
-        _DepthWrite=0 with _ZWrite=0, so they were the only ones the old reading
-        happened to get right.
+        Keeping the stage as the source also preserves what the old reading got
+        right by accident: `arm` and `hand` sit at stage 7 too, so they still
+        write depth and still stop the later hair from painting over a nearer
+        arm -- the case that motivated reading _DepthWrite in the first place
+        (pl_140000's arm went 506 -> 4017 of its own 8310 px then, and the stage
+        rule keeps it there).  Hair, face and most clothing are stage 22
+        (Alpha), which the game gives depthWrite false, matching the value those
+        materials happened to author and preserving coplanar fringe over face.
+
+        The material name is not a usable proxy for any of this, and neither is
+        the material identity: the `_body` material is shared by meshes on both
+        sides of the split -- chest/arm/hand at stage 7 against most garments at
+        stage 22 -- so callers must not set depth state on a shared material.
+        add_generic_materials() splits it per depth group instead
+        (.codex-tmp/material_stage_conflict.py, depth_census.py).
 
         The blend classification below still reads _Mode/_DstBlend.  It is left
         alone deliberately: both consumers of this glTF (models.js and
@@ -576,13 +657,17 @@ class KirafanExporter:
         floats = cls.material_floats(material)
         mode = floats.get("_Mode", 0.0)
         dst = floats.get("_DstBlend", 0.0)
-        # _DepthWrite is what the shader binds.  Fall back to the dead _ZWrite
-        # only for a material that carries no _DepthWrite at all, i.e. one drawn
-        # by some shader outside the two dumped above.
-        if "_DepthWrite" in floats:
-            depth_write = floats["_DepthWrite"] != 0.0
-        else:
-            depth_write = floats.get("_ZWrite", 1.0) != 0.0
+        # The asset's own _DepthWrite is a starting value the game throws away.
+        # MsbObjectHandler.Init() rewrites it per *object* from the render stage
+        # before anything draws (see depth_write_for_stage), so reading it here
+        # was reading a value the game never renders with.  depth_write is
+        # therefore supplied by the caller, which knows the mesh's stage; this
+        # fallback only covers materials reached with no stage at all.
+        if depth_write is None:
+            if "_DepthWrite" in floats:
+                depth_write = floats["_DepthWrite"] != 0.0
+            else:
+                depth_write = floats.get("_ZWrite", 1.0) != 0.0
         # UnityEngine.Rendering.BlendMode.Zero is 0; anything else blends.
         blends = mode >= 2.0 or dst != 0.0
         if blends:
@@ -623,7 +708,7 @@ class KirafanExporter:
                 image.putalpha(self.fit_alpha(
                     alpha_texture.image.getchannel("A"), image.size))
             texture_index = self.builder.add_png(image, material.m_Name)
-            entry = {
+            base = {
                 "name": material.m_Name,
                 "doubleSided": True,
                 "pbrMetallicRoughness": {
@@ -633,10 +718,91 @@ class KirafanExporter:
                 },
                 "extensions": {"KHR_materials_unlit": {}},
             }
-            entry.update(self.alpha_state(material))
-            self.builder.document["materials"].append(entry)
-            result[item.path_id] = len(self.builder.document["materials"]) - 1
+            # One glTF material per (asset material, depth group).  The game
+            # overrides depth per object on the renderer's own instance, so a
+            # single asset material legitimately renders with both settings --
+            # `_body` covers chest/arm/hand at stage 7 and most garments at
+            # stage 22.  glTF materials are shared by reference, so emitting one
+            # entry would force one of the two groups to the wrong depth state.
+            # Only the variants actually needed are emitted, by
+            # material_variants(); an unused group costs nothing.
+            variants: dict[bool, int] = {}
+            for depth_write in self.depth_groups_for_material(item.path_id):
+                entry = copy.deepcopy(base)
+                if depth_write is not None:
+                    suffix = "" if depth_write else "__nodepth"
+                    entry["name"] = material.m_Name + suffix
+                entry.update(self.alpha_state(material, depth_write))
+                self.builder.document["materials"].append(entry)
+                variants[bool(depth_write)] = len(self.builder.document["materials"]) - 1
+            self.material_variants[item.path_id] = variants
+            result[item.path_id] = variants[next(iter(variants))] if variants else 0
         return result
+
+    def depth_groups_for_material(self, material_path_id: int) -> list[bool | None]:
+        """Which depth-write settings this material is actually rendered with.
+
+        Derived from the stages of the meshes that use it, so a material used
+        only by stage-22 meshes yields a single no-depth entry and nothing is
+        duplicated for the common case.
+        """
+        groups = self.material_depth_groups.get(material_path_id)
+        if not groups:
+            return [None]
+        return sorted(groups)
+
+    def read_material_depth_groups(self) -> dict[int, set[bool]]:
+        """Per material, the depth-write settings its exported meshes need.
+
+        Walks the same renderers add_meshes()/add_generic_meshes() will export
+        -- same hierarchy, head-layer and generic-renderer filters -- so the
+        variants add_generic_materials() emits are exactly the ones a mesh will
+        ask for, and no material is duplicated for a mesh that never ships.
+        """
+        groups: dict[int, set[bool]] = {}
+        for item in self.environment.objects:
+            if item.type.name not in ("SkinnedMeshRenderer", "MeshRenderer"):
+                continue
+            renderer = item.read()
+            transform = self.transform_for_game_object.get(pptr_id(renderer.m_GameObject))
+            if transform is None or not renderer.m_Materials:
+                continue
+            mesh_name = self.renderer_mesh_name(renderer)
+            if mesh_name is None:
+                continue
+            packed = self.render_orders.get(mesh_name)
+            if packed is None:
+                continue
+            name = renderer.m_GameObject.read().m_Name
+            if self.mode == "player":
+                kind = self.hierarchy_kind(transform)
+                if kind not in {"body", "head"}:
+                    continue
+                if kind == "head" and not self.include_head_renderer(name):
+                    continue
+            elif not self.include_generic_renderer(name):
+                continue
+            material_id = pptr_id(renderer.m_Materials[0])
+            groups.setdefault(material_id, set()).add(
+                self.depth_write_for_stage(packed // 1000000))
+        return groups
+
+    def renderer_mesh_name(self, renderer: Any) -> str | None:
+        """The mesh an Msb draw entry names, as the mesh itself spells it.
+
+        Skinned renderers carry it directly; static ones keep it on a MeshFilter
+        component, the same walk add_static_renderer() does.
+        """
+        if hasattr(renderer, "m_Mesh") and renderer.m_Mesh:
+            return renderer.m_Mesh.read().m_Name
+        for component in renderer.m_GameObject.read().m_Component:
+            try:
+                candidate = component.component.read()
+            except Exception:
+                continue
+            if hasattr(candidate, "m_Mesh") and candidate.m_Mesh:
+                return candidate.m_Mesh.read().m_Name
+        return None
 
     @staticmethod
     def include_head_renderer(name: str) -> bool:
@@ -728,9 +894,24 @@ class KirafanExporter:
         return direction is None or direction.group(1) == "30"
 
     def renderer_material(self, renderer: Any, materials: dict[int, int]) -> int:
+        """The glTF material a renderer should draw with, variant-aware.
+
+        The depth state lives on the material in glTF but is authored per mesh
+        in the game (MsbObjectHandler.Init() keys it off the render stage), so
+        a renderer whose material has variants gets the one matching its own
+        stage; everything else, and any mesh MsbHandler does not name, falls
+        back to the material's first variant.
+        """
         if renderer.m_Materials:
             material_id = pptr_id(renderer.m_Materials[0])
             if material_id in materials:
+                variants = self.material_variants.get(material_id)
+                mesh_name = self.renderer_mesh_name(renderer)
+                packed = self.render_orders.get(mesh_name) if mesh_name else None
+                if variants and packed is not None:
+                    depth = self.depth_write_for_stage(packed // 1000000)
+                    if depth in variants:
+                        return variants[depth]
                 return materials[material_id]
         return next(iter(materials.values()))
 
