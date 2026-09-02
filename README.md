@@ -11,6 +11,8 @@
 
 非官方同人作品，与芳文社、EXNOA 无关。游戏资产版权归原权利方所有。
 
+本站的开发（含资产逆向、格式转换与渲染调试）大量借助了 AI（Claude）完成。
+
 > 本项目最初基于上游 [icekirby/kirafan-timer](https://github.com/icekirby/kirafan-timer) 的活动倒计时器改造而来（灵感来源与起步代码），现已发展为独立的纪念站点，与上游功能基本不再重叠。
 
 ## 部署

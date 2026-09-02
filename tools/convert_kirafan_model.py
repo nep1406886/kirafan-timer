@@ -253,6 +253,9 @@ class KirafanExporter:
         # Filled as a side effect of read_render_orders(): both live on the same
         # MsbHandler entry, so reading them together costs one pass.
         self.hidden_meshes: set[str] = set()
+        # Set by orient_triangles(): winding bookkeeping.
+        self.mirrored_meshes: int = 0
+        self.reversed_meshes: int = 0
         self.render_orders = self.read_render_orders()
         root_names = [self.object_name(transform).lower() for transform in self.transforms.values()]
         texture_names = [
@@ -295,6 +298,59 @@ class KirafanExporter:
                 return "head"
             current = self.transforms.get(pptr_id(current.m_Father))
         return None
+
+    def chain_mirrored(self, transform: Any) -> bool:
+        """Whether this node's world matrix flips handedness.
+
+        A mirror -- an odd number of negative scale components anywhere up
+        the transform chain -- reverses triangle winding in world space.  The
+        left-to-right-handed conversion (the X reflection in vec3/quat) also
+        reverses winding once, which every mesh compensates by reversing its
+        index order on write; a mesh behind a mirror scale must keep its
+        authored order instead, or it comes out inside-out.
+
+        This is what _CullMode=Back depends on: the Meige shaders bind
+        culling <-[_CullMode], and the fleet's materials are 4851 Back against
+        387 Off with not a single Front (checked over all 1859 bundles,
+        .codex-tmp/cull_census.py).  The game culls garment insides off the
+        screen; DoubleSide exports put them back, and once the stage-derived
+        depth rules stopped writing depth on alpha-stage chests, a lining or
+        cape behind the torso could paint straight over it -- the see-through
+        front torso the site shipped with.
+        """
+        node = transform
+        mirrored = False
+        seen: set[int] = set()
+        while node is not None and node.object_reader.path_id not in seen:
+            seen.add(node.object_reader.path_id)
+            scale = node.m_LocalScale
+            if float(scale.x) * float(scale.y) * float(scale.z) < 0:
+                mirrored = not mirrored
+            node = self.transforms.get(pptr_id(node.m_Father))
+        return mirrored
+
+    def orient_triangles(self, triangles: list[tuple[float, float, float]], transform: Any, skinned: bool) -> list[tuple[float, float, float]]:
+        """Give triangles outward-facing winding in glTF's right-handed space.
+
+        The export negates X of every position (and reflects translations and
+        rotations to match), which mirrors the mesh and swaps front with back;
+        reversing each triangle undoes the flip.  A mesh behind a mirror scale
+        up its transform chain gets flipped an extra time by that scale, so it
+        must keep its authored order -- see chain_mirrored.
+
+        That chain rule only holds for meshes the chain actually transforms:
+        skinned vertices ride the skeleton instead (both in Unity and in
+        glTF/three.js the mesh node's own chain cancels out of the skinning),
+        so for skinned meshes the reversal is unconditional.  The one model
+        where this mattered (pl_270102, whose face mesh nodes sit under the
+        scale-(-1,1,1) hana_face_*_L rig nodes) has no mirrored bones, and
+        bone chains are checked positive-determinant at bind.
+        """
+        if skinned or not self.chain_mirrored(transform):
+            self.reversed_meshes += 1
+            return [(c, b, a) for a, b, c in triangles]
+        self.mirrored_meshes += 1
+        return triangles
 
     def read_render_orders(self) -> dict[str, int]:
         """Flatten the game's three draw keys into one glTF renderOrder.
@@ -708,9 +764,15 @@ class KirafanExporter:
                 image.putalpha(self.fit_alpha(
                     alpha_texture.image.getchannel("A"), image.size))
             texture_index = self.builder.add_png(image, material.m_Name)
+            floats = self.material_floats(material)
+            # The game binds back-face culling to this material's _CullMode
+            # (eCullMode: Off=0, Front=1, Back=2; the fleet is 4851 Back vs
+            # 387 Off, zero Front).  Only the rare Off materials keep their
+            # far side; forcing doubleSided everywhere lets garment interiors
+            # paint over alpha-stage bodies that no longer write depth.
             base = {
                 "name": material.m_Name,
-                "doubleSided": True,
+                "doubleSided": floats.get("_CullMode", 2.0) == 0.0,
                 "pbrMetallicRoughness": {
                     "baseColorTexture": {"index": texture_index},
                     "metallicFactor": 0,
@@ -960,7 +1022,8 @@ class KirafanExporter:
         triangles = handler.get_triangles()[0]
         index_dtype = np.uint16 if len(positions) <= 65535 else np.uint32
         index_component = COMPONENT_UNSIGNED_SHORT if index_dtype == np.uint16 else COMPONENT_UNSIGNED_INT
-        indices = np.asarray([(c, b, a) for a, b, c in triangles], dtype=index_dtype).reshape(-1)
+        triangles = self.orient_triangles(triangles, transform, skinned=False)
+        indices = np.asarray(triangles, dtype=index_dtype).reshape(-1)
         index_accessor = self.builder.add_accessor(indices, index_component, "SCALAR", TARGET_ELEMENT_ARRAY_BUFFER)
         self.builder.document["meshes"].append(
             {
@@ -999,7 +1062,8 @@ class KirafanExporter:
         triangles = handler.get_triangles()[0]
         index_dtype = np.uint16 if len(positions) <= 65535 else np.uint32
         index_component = COMPONENT_UNSIGNED_SHORT if index_dtype == np.uint16 else COMPONENT_UNSIGNED_INT
-        indices = np.asarray([(c, b, a) for a, b, c in triangles], dtype=index_dtype).reshape(-1)
+        triangles = self.orient_triangles(triangles, transform, skinned=True)
+        indices = np.asarray(triangles, dtype=index_dtype).reshape(-1)
         index_accessor = self.builder.add_accessor(indices, index_component, "SCALAR", TARGET_ELEMENT_ARRAY_BUFFER)
         primitive = {
             "attributes": {
@@ -1376,7 +1440,9 @@ class KirafanExporter:
         print(
             f"Wrote {output} ({output.stat().st_size:,} bytes, {self.mode}, "
             f"{len(self.builder.document['meshes'])} meshes, "
-            f"{len(self.builder.document['animations'])} animations)"
+            f"{len(self.builder.document['animations'])} animations"
+            + (f", {self.mirrored_meshes} mirror-wound" if self.mirrored_meshes else "")
+            + ")"
         )
 
 

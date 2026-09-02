@@ -4352,10 +4352,18 @@
                             if (fringeHelpers) {
                                 fringeHelpers.dilateMaterialTextures(child.material, THREE, FRINGE_OPTIONS);
                             }
-                            // Weapons carry their cartoon outline as an inverted
-                            // hull mapped to a black texel, so they must cull
-                            // back faces or the shell hides the weapon.
-                            child.material.side = modelKind === "weapon" ? THREE.FrontSide : THREE.DoubleSide;
+                            // Cull state comes from the asset now, not from us:
+                            // the exporter writes glTF doubleSided from the
+                            // game's own _CullMode (Back on 4851 of the fleet's
+                            // 5238 culling materials), so GLTFLoader arrives at
+                            // FrontSide/DoubleSide on its own.  Forcing
+                            // DoubleSide here painted garment interiors
+                            // (skirt_ura, cloth_B, cape backs) over the
+                            // no-depth-write alpha-stage bodies.  Weapons keep
+                            // FrontSide regardless: their cartoon outline is an
+                            // inverted hull mapped to a black texel, and the
+                            // shell hides the weapon unless back faces cull.
+                            if (modelKind === "weapon") child.material.side = THREE.FrontSide;
                             // Kept for the layers the atlas really does blend
                             // (m_eRenderStage 7 draws behind the body), and as the
                             // tie-break the engine authored via m_HieIndex.
